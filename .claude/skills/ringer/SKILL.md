@@ -256,6 +256,36 @@ per task via the manifest `engine` field. Defaults are deliberate:
   image-gen, docs, probe, bakeoff, ...). Untyped tasks bucket as (untyped)
   and teach the scoreboard nothing; lint nudges you when it's missing.
 
+## Feeder wire-class contract (THIS MACHINE — fleet directive, Adam-approved 2026-07-14)
+
+On this box every real worker's LLM is served by Feeder (`http://localhost:3001/v1`
+via the `opencode` engine). Feeder does NOT validate the wire class — an
+unrecognised `auto/<class>` SILENTLY degrades to the generic `overall` prior in
+both routing and the quality feed. Enforcement is the orchestrator's job:
+
+1. **The wire vocabulary is exactly 7 tokens**: `coding`, `math`, `reasoning`,
+   `creative_writing`, `instruction_following`, `long_query`, `multi_turn`.
+   Never use Feeder's aliases (code/writing/puzzle/long/...); never pin
+   `overall`. Bare `auto` (= overall) only for genuinely unclassifiable tasks.
+2. **Every feeder-routed task carries BOTH fields**: local `task_type` (Ringer's
+   native vocab, local scoreboard) AND an explicit `"wire_class"` — with
+   `"model": "feeder/auto/<wire_class>"` agreeing. The orchestrator decides the
+   wire_class per task (default map in `scripts/wire_class.py --map`; ambiguous
+   types — docs, bakeoff — are decided per task, recorded in the manifest,
+   never re-guessed at runtime).
+3. **Validate before every run**: `python3 scripts/wire_class.py <manifest>`
+   alongside `./ringer.py lint`. Periodically (and before any non-coding run):
+   `scripts/wire_class.py --check-enum` — the no-drift check against Feeder's
+   live canon.
+4. **Pre-launch capacity ritual (hard-refuse rule)**: every concurrent worker
+   gets a DISTINCT provider platform, so before launching a swarm run
+   `python3 scripts/swarm_capacity.py <wire_class> <manifest_max_parallel>` and
+   pass the printed number as `--max-parallel`; re-query per round. If the
+   endpoint isn't up, fall back to the manifest value and rely on Feeder
+   backpressure.
+5. **Quality feedback keys on wire_class** (Feeder's task_scores granularity),
+   never on local task_type — two scoreboards at two granularities, deliberately.
+
 ## Worktrees-mode footguns (learned the hard way)
 
 Run-level `"worktrees": true` gives each task an isolated git worktree of

@@ -102,7 +102,11 @@ Enforcement is 100% Ringer-side. Do NOT use feeder's aliases (code/writing/puzzl
 in the manifest — orchestrator owns the mapping per task, auditable, never re-guessed at runtime.
 Quality feed to Feeder keys on wire_class; local scoreboard keys on task_type. Validate the vocab
 against `GET /api/canon/task-types` (minus overall) as the no-drift check.
-**Until the validator + rubric are built in-repo: coding-class runs only.**
+**BUILT 2026-07-14 — widening hold LIFTED:** validator `scripts/wire_class.py` (validate +
+`--check-enum` no-drift + `--map`), capacity query `scripts/swarm_capacity.py` (hard-refuse
+pre-launch ritual), rubric in the skill (`.claude/skills/ringer/SKILL.md` § "Feeder wire-class
+contract"), OpenCode provider models map covers all 7 classes + bare auto. Run the validator with
+every lint; run `--check-enum` before any non-coding run.
 
 ## PREREQUISITE STATUS
 Feeder's **quota-bench fix is LIVE** (feeder commit `ca67383`, verified) — a daily/tier-quota 429 now

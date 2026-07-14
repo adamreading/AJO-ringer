@@ -6,6 +6,7 @@
     {
       "key": "seam-probe",
       "task_type": "probe",
+      "wire_class": "coding",
       "engine": "opencode",
       "model": "feeder/auto/coding",
       "spec": "You are the first real Ringer worker on this machine, and this task is the Phase-2 seam probe: your LLM calls are served by the Feeder router, and this run proves that seam end to end. Boundary: work only inside your current task directory; you own exactly one file, seam.py; do not create, modify, or read anything else, do not run git, do not install anything. Goal: create seam.py, a Python 3 script that when executed with 'python3 seam.py' prints exactly one line to stdout: feeder seam ok. No extra output, no trailing whitespace beyond the single newline. Keep the script minimal (a single print statement is correct).",
