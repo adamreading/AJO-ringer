@@ -160,6 +160,19 @@ LLM comes from Feeder.**
   feeder-claude stands up `GET /api/requests?consumer=&session_id=&since=` then — deliberately not
   built spec-ahead. feeder-claude's standing offer: a /api/model-perf/sample smoke test against a
   throwaway canonical as the Phase-5 dry run.
+  **UPDATE 2026-07-14 12:23 — attribution fallback now guaranteed:** feeder commit `9ab0f31` reads
+  OpenCode's `X-Session-Id` header as the sticky session key AND logs it to `requests.session_id`
+  (live-verified by feeder-claude) — so session→served-model is an exact-key join with zero new
+  surface, even if OpenCode's json stream swallows X-Routed-Via.
+  **UPGRADE (Adam via WSL, 2026-07-14 12:23) — GRADED, not binary:** `quality_score` = the
+  orchestrator's considered 0..1 judgment per worker output (executed-check result AND output
+  quality: pass+good ~1.0; pass-but-poor — ugly/overcomplicated/barely-scraped — ~0.4-0.6; fail
+  ~0.0), keyed on concrete served model × wire_class, `judge:"ringer"`, same realtime_quality
+  EWMA lane as hermes + the UI thumbs = one fleet quality brain; persistently-poor models fade
+  from the swarm. Phase-5 build notes: (i) write a small grading rubric so scores are consistent
+  across sessions (an EWMA amplifies grader drift); (ii) sidecar emits samples ONLY for attempts
+  whose session actually got served completions — a backpressured/ALL_RATE_LIMITED attempt has no
+  served model and must not score anyone.
 - **Phase 6 — install-agent:** register the orchestrator skill + hooks in `~/.claude`.
 
 ### Bootstrap & coordination — how Ringer-Claude is born + joins the board (verified pattern)
