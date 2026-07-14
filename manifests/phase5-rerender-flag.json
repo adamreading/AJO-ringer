@@ -1,0 +1,20 @@
+{
+  "run_name": "phase5-quality-feed",
+  "workdir": "/tmp/ringer-rerender",
+  "worktrees": true,
+  "repo": "/home/ajo/ringer",
+  "max_parallel": 1,
+  "tasks": [
+    {
+      "key": "rerender-flag",
+      "task_type": "code-feature",
+      "wire_class": "coding",
+      "engine": "opencode",
+      "model": "feeder/auto/coding",
+      "spec": "You are a Ringer worker making ONE scoped addition to ONE existing file in a git worktree of the ringer repo. Your current working directory IS that worktree — edit files here directly, leave ALL changes uncommitted (never run git commit; the check exports your diff as a patch). You own EXACTLY ONE file: scripts/feeder_enrich.py (~190 lines). Do not modify any other file.\n\nCONTEXT: scripts/feeder_enrich.py already works: it reads a Ringer run state JSON (--state), finds each task's worker.log under --workdir (task subdir, or logs/<key>.worker.log), extracts session ids, fetches Feeder request rows (--fixture file or live GET), aggregates them, and writes a task[\"feeder\"] telemetry block back into the state JSON. Problem: a run's HTML artifact pages were rendered when the run CLOSED, so enrichment done afterwards is invisible until the pages are re-rendered — today that needs a hand-written python snippet. Fleet users hit this twice already.\n\nIMPLEMENT: add two CLI flags to scripts/feeder_enrich.py:\n1. --rerender (boolean): after the state is enriched and written, re-render this run's two artifact pages so the new telemetry shows. Import the renderer from the repo's own ringer.py: add the directory containing ringer.py to sys.path using a path RELATIVE TO THIS SCRIPT (pathlib.Path(__file__).resolve().parent.parent — never a hardcoded absolute path, so the worktree copy tests its own ringer.py), then: import ringer; renderer = ringer.ArtifactRenderer(artifacts_dir / \"x.html\"); for each of the two page paths that EXIST — artifacts_dir / f\"{run_id}-report.html\" and artifacts_dir / \"live\" / f\"{run_name}.html\" (run_id and run_name from the state JSON) — write renderer.render_final_report_html(state, page_path=<that path>) over the file (utf-8) and print one line per page written. A page that does not exist is skipped with a printed note, never created, never an error. NEVER touch any other file in the artifacts dir (other runs' pages live there too).\n2. --artifacts-dir DIR (default: ~/.ringer/artifacts, expanduser).\nWithout --rerender the script's behavior must remain byte-for-byte what it is today. The rerender step runs AFTER the enriched state is saved, and reads the enriched state (the in-memory object you just wrote is fine). Wrap the import+render in a try/except that prints a clear error and exits 4 if rendering fails — enrichment success must still have been persisted by then.\n\nHOW TO VERIFY (this exact command is the task's check — run it yourself from the worktree root until it passes): sh /home/ajo/ringer/scripts/checks/phase5_rerender_check.sh\nThe check enriches a fixture run with --rerender against a temp artifacts dir holding stub pages for this run plus a stray page for another run, and asserts: both this run's pages now contain the 'Served by' strip and the model name, the stray page is untouched, and the no-flag path still works.\n\nHARD RULES: stdlib only (ringer.py import aside); no git commit; only scripts/feeder_enrich.py may change; keep the addition small and localized; write nothing outside the worktree except what the check itself exports.",
+      "check": "mkdir -p /tmp/ringer-rerender/patches && git add -A && git diff --cached > /tmp/ringer-rerender/patches/rerender.patch && sh /home/ajo/ringer/scripts/checks/phase5_rerender_check.sh",
+      "timeout_s": 600,
+      "verified": "feeder_enrich --rerender was executed against a fixture and rewrote exactly this run's report and live pages with the telemetry strips, leaving other runs' pages untouched"
+    }
+  ]
+}
