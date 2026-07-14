@@ -311,3 +311,19 @@ checks and raw logs support — no vibes, no worker self-reports.
 
 ## opencode / z-ai glm-5.2 (via openrouter)
 - 2026-07-09 (aicred-invoice-downloads, 4 code-fix tasks + 1 follow-up, worktrees+npm ci checks): systematic attempt-1 NO-OP — all 4 parallel workers produced zero edits and no summary on first attempt, then completed cleanly on attempt 2 after retry-prompt injection (34k-69k tokens each). Follow-up single task passed attempt 1. Suspect first-invocation session warm-up in opencode-sandboxed under parallel spawn; budget for 2 attempts on parallel GLM batches. Output quality on Next.js/Stripe route+test work: solid, spec-faithful, one boss-caught design gap (used user-scoped supabase client where RLS demanded service role — spec didn't say explicitly; say it explicitly).
+
+## feeder/auto/coding (Feeder-routed lane — served model varies; see task's feeder block)
+
+- 2026-07-14 — phase3-demo + phase4-feeder-telemetry (code-feature, WSL box).
+  GREEN-FIELD WORK IS STRONG: trivial file tasks 3/3 first-try; a 169-line
+  stdlib script against an exact aggregation contract passed first try
+  (served mostly sambanova/DeepSeek-V3.1). SURGICAL EDITS TO A HUGE FILE ARE
+  NOT: three rounds failed to insert one helper + call sites into the
+  9,100-line ringer.py, each differently (NameError from scope-blind call
+  sites; CSS pasted outside a string literal → SyntaxError; broken
+  indentation), ~250k tokens total. Retry-with-failure-context did not
+  rescue any of the three. What I'd do differently: keep this lane on
+  green-field files and small scoped edits; route large-file surgery to a
+  frontier lane (none installed yet — orchestrator integrated the reviewed
+  helper by hand this time), or pre-chunk the edit into a tiny target file
+  the worker owns.

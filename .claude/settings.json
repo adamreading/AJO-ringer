@@ -1,0 +1,6 @@
+{
+  "env": {
+    "COORD_AGENT": "ringer-claude",
+    "TASK_WATCH_AGENT": "ringer-claude"
+  }
+}

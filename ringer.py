@@ -3499,6 +3499,39 @@ def render_work_section(
   </section>"""
 
 
+def render_feeder_strip(task_dict: dict[str, Any]) -> str:
+    # Routing telemetry written post-run by scripts/feeder_enrich.py (the
+    # Feeder router's view: which concrete models actually served this worker,
+    # failovers, latency). Optional and fail-open: absent/malformed -> "".
+    feeder = task_dict.get("feeder")
+    if not feeder or not isinstance(feeder, dict):
+        return ""
+    served = feeder.get("served")
+    if not served or not isinstance(served, list):
+        return ""
+    parts = []
+    for item in served:
+        if not isinstance(item, dict):
+            continue
+        platform = item.get("platform")
+        model_id = item.get("model_id")
+        calls = item.get("calls")
+        output_tokens = item.get("output_tokens")
+        if not all(isinstance(x, str) for x in (platform, model_id)) or not isinstance(calls, int) or not isinstance(output_tokens, int):
+            continue
+        parts.append(f"{html_escape(platform)}/{html_escape(model_id)} ({calls} calls, {output_tokens} tok)")
+    if not parts:
+        return ""
+    strip = "Served by: " + " → ".join(parts)
+    failovers = feeder.get("failovers")
+    if isinstance(failovers, int) and failovers > 0:
+        strip += f" · {failovers} failover{'s' if failovers != 1 else ''}"
+    latency_ms_p50 = feeder.get("latency_ms_p50")
+    if isinstance(latency_ms_p50, int):
+        strip += f" · p50 {latency_ms_p50}ms"
+    return strip
+
+
 def render_work_group(
     task: dict[str, Any],
     *,
@@ -3563,6 +3596,11 @@ def render_work_group(
                 f"<pre>{html_escape(shorten(proof_tail, 1200))}</pre></details>"
             )
 
+    feeder_strip = render_feeder_strip(task)
+    feeder_html = (
+        f'<span class="verified feeder-strip mono">{feeder_strip}</span>' if feeder_strip else ""
+    )
+
     links_html = render_task_links(
         task,
         state=state,
@@ -3581,6 +3619,7 @@ def render_work_group(
       </div>
       <div class="work-group-body">
         {items_html}
+        {feeder_html}
         {verified_html}
         <span class="links">{links_html}</span>
       </div>
