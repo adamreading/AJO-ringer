@@ -239,7 +239,8 @@ LLM comes from Feeder.**
 - **Telemetry definitions gap (first dogfood, 2026-07-14):** enrich's `failovers` counts
   success→success transitions; feeder additionally sees the failed ATTEMPTS between them
   (402 payment-gated, 413 size-limit churn — none 429s). Break out non-429 error counts in
-  the feeder block + strip so provider churn is visible in Ringside. (Feeder-side catalog
+  the feeder block + strip so provider churn is visible in Ringside — zero feeder change
+  needed (feeder-claude confirmed: /api/requests rows already carry status + error). (Feeder-side catalog
   follow-ups are feeder-claude's lane: MiniMax 402-on-free-tier, github 413 size limits.)
 
 ### Bootstrap & coordination — how Ringer-Claude is born + joins the board (verified pattern)
