@@ -141,6 +141,12 @@ LLM comes from Feeder.**
   (canonical `deepseek-v3-1`). **Full --max-parallel ACKED by feeder-claude.**
 - **Phase 3 — Prove Ringer:** `./ringer.py demo` green + Ringside at `127.0.0.1:8700`. (If the demo's
   Codex default isn't available, point the demo engine at the Feeder-backed OpenCode worker.)
+  **✅ DONE 2026-07-14 (Adam's green light via WSL).** Built-in demo is codex-hardwired (no
+  --engine flag), so its 3 tasks were mirrored verbatim onto the feeder lane
+  (`manifests/phase3-demo.json`): **3/3 first-try PASS, genuinely parallel** (8.1/8.1/11.3s
+  overlapping, ~7.2k tok each, $0), full pre-launch ritual exercised end-to-end
+  (lint + wire_class + capacity 11 lanes). Artifacts spot-checked; session ids handed to
+  feeder-claude for the served-model lookup (first real use of the requests.session_id join).
 - **Phase 4 — First real manifest:** one small real task, run through the Feeder-backed swarm at low
   parallelism, check passes end-to-end.
 - **Phase 5 — Quality feedback:** the runs.jsonl → `/api/model-perf/sample` sidecar (body:
