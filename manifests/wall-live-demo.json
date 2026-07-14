@@ -1,0 +1,63 @@
+{
+  "run_name": "agent-wall-live",
+  "workdir": "/tmp/ringer-wall-live",
+  "max_parallel": 4,
+  "tasks": [
+    {
+      "key": "mergesort",
+      "task_type": "code-feature",
+      "wire_class": "coding",
+      "engine": "opencode",
+      "model": "feeder/auto/coding",
+      "timeout_s": 420,
+      "spec": "Create a file mergesort.py in your current working directory. Implement a pure function merge_sort(items) that returns a NEW sorted list (ascending) using the merge sort algorithm \u2014 do NOT call sorted() or list.sort(); implement the merge yourself. It must handle an empty list, a single element, duplicates, and negative numbers. Include a clear docstring. Do NOT create any other file. When you are done, run your own file to sanity-check it before finishing.",
+      "check": "cd /tmp/ringer-wall-live/mergesort && python3 -c \"import mergesort as m; assert m.merge_sort([])==[]; assert m.merge_sort([3,1,2])==[1,2,3]; assert m.merge_sort([5,-2,5,0,-2])==[-2,-2,0,5,5]; import random; r=[random.randint(-50,50) for _ in range(40)]; assert m.merge_sort(r)==sorted(r); print('mergesort ok')\" || { echo 'FAIL: merge_sort did not sort correctly'; exit 1; }",
+      "verified": "merge_sort correctly sorts (incl. empty/dupes/negatives) vs sorted() on random input (executed)",
+      "expect_files": [
+        "mergesort.py"
+      ]
+    },
+    {
+      "key": "haiku-trio",
+      "task_type": "creative-writing",
+      "wire_class": "creative_writing",
+      "engine": "opencode",
+      "model": "feeder/auto/creative_writing",
+      "timeout_s": 420,
+      "spec": "Write THREE distinct haiku, each capturing a different facet of a fleet of small AI agents working in parallel under a single orchestrator: (1) the parallelism, (2) the verification/checks, (3) the orchestrator's oversight. Write them to a file named haikus.txt in your current working directory, separated by a blank line between each haiku, three lines per haiku. Write nothing else.",
+      "check": "f=/tmp/ringer-wall-live/haiku-trio/haikus.txt; test -f \"$f\" && n=$(grep -c . \"$f\") && [ \"$n\" -ge 9 ] && echo \"haiku-trio ok ($n non-empty lines)\" || { echo 'FAIL: haikus.txt must contain three haiku (>=9 non-empty lines)'; exit 1; }",
+      "verified": "haikus.txt contains three haiku (nine or more non-empty lines)",
+      "expect_files": [
+        "haikus.txt"
+      ]
+    },
+    {
+      "key": "explainer",
+      "task_type": "instruction-following",
+      "wire_class": "instruction_following",
+      "engine": "opencode",
+      "model": "feeder/auto/instruction_following",
+      "timeout_s": 420,
+      "spec": "Write a short markdown explainer to a file named about.md in your current working directory. Requirements, followed EXACTLY: it must start with a level-1 heading line '# Ringer'; then a paragraph of 60-140 words explaining, in plain language, that Ringer is an orchestrator that runs many cheap AI agents in parallel and trusts only an executed check (exit 0) as proof; then a markdown bullet list of exactly three bullets, each naming one benefit. Create no other file.",
+      "check": "cd /tmp/ringer-wall-live/explainer && python3 -c \"import re,sys; t=open('about.md').read(); assert t.lstrip().startswith('# Ringer'), 'must start with # Ringer'; bullets=[l for l in t.splitlines() if l.strip().startswith(('- ','* '))]; assert len(bullets)>=3, 'need >=3 bullets, got %d'%len(bullets); words=len(re.findall(r\\\"[A-Za-z']+\\\", t)); assert words>=60, 'too short: %d words'%words; print('explainer ok: %d words, %d bullets'%(words,len(bullets)))\" || { echo 'FAIL: about.md did not meet the structure/length contract'; exit 1; }",
+      "verified": "about.md starts with '# Ringer', has a 60+ word explanation and at least three bullets (executed)",
+      "expect_files": [
+        "about.md"
+      ]
+    },
+    {
+      "key": "stats",
+      "task_type": "code-feature",
+      "wire_class": "coding",
+      "engine": "opencode",
+      "model": "feeder/auto/coding",
+      "timeout_s": 420,
+      "spec": "Create a file stats.py in your current working directory, standard library only. Implement three pure functions: mean(nums), median(nums), and mode(nums). mean returns the arithmetic mean as a float; median returns the middle value (average of the two middle values for even-length input); mode returns the single most common value (if there is a tie, return the smallest of the tied values). Each must raise ValueError on an empty input. Include a concise docstring on each. Create no other file, and sanity-check your work by running it before finishing.",
+      "check": "cd /tmp/ringer-wall-live/stats && python3 -c \"import stats as s\nassert abs(s.mean([1,2,3,4])-2.5)<1e-9\nassert s.median([1,2,3,4])==2.5\nassert s.median([5,1,3])==3\nassert s.mode([1,1,2,2,3])==1\nassert s.mode([4,4,4,2])==4\nraised=False\ntry:\n    s.mean([])\nexcept ValueError:\n    raised=True\nassert raised, 'no ValueError on empty'\nprint('stats ok')\" || { echo 'FAIL: stats.py contract (mean/median/mode + empty ValueError) not met'; exit 1; }",
+      "verified": "stats.py mean/median/mode meet the exact contract incl. tie-break and empty-input ValueError (executed)",
+      "expect_files": [
+        "stats.py"
+      ]
+    }
+  ]
+}
