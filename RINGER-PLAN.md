@@ -216,6 +216,12 @@ LLM comes from Feeder.**
   health covers swarm models with no extra probing.
 - **Phase 6 — install-agent:** register the orchestrator skill + hooks in `~/.claude`.
 
+### Post-v1 backlog (parked, Adam 2026-07-14 14:13 — "fix later", not blocking)
+- **Telemetry UX polish:** (1) surface served-model/failover telemetry at the ROUND-summary
+  header too, not only per-worker cards; (2) a presentation pass on the "Served by" strip
+  (Adam's verdict on v1 styling: weak). Also: per-round session scoping for re-run tasks
+  (shared worktrees log spans rounds → a re-run task's block aggregates all rounds).
+
 ### Bootstrap & coordination — how Ringer-Claude is born + joins the board (verified pattern)
 Ringer gets its OWN dedicated Claude ("Ringer-Claude") = a Claude Code session with cwd=`~/ringer`,
 same WSL `ajo` user, distinguished by working dir + `COORD_AGENT`. Proven by feeder-claude, which is
