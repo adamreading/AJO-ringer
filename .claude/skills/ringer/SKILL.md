@@ -270,16 +270,16 @@ both routing and the quality feed. Enforcement is the orchestrator's job:
 2. **Every feeder-routed task carries BOTH fields**: local `task_type` (Ringer's
    native vocab, local scoreboard) AND an explicit `"wire_class"` — with
    `"model": "feeder/auto/<wire_class>"` agreeing. The orchestrator decides the
-   wire_class per task (default map in `scripts/wire_class.py --map`; ambiguous
+   wire_class per task (default map in `/home/ajo/ringer/scripts/wire_class.py --map`; ambiguous
    types — docs, bakeoff — are decided per task, recorded in the manifest,
    never re-guessed at runtime).
-3. **Validate before every run**: `python3 scripts/wire_class.py <manifest>`
+3. **Validate before every run**: `python3 /home/ajo/ringer/scripts/wire_class.py <manifest>`
    alongside `./ringer.py lint`. Periodically (and before any non-coding run):
-   `scripts/wire_class.py --check-enum` — the no-drift check against Feeder's
+   `/home/ajo/ringer/scripts/wire_class.py --check-enum` — the no-drift check against Feeder's
    live canon.
 4. **Pre-launch capacity ritual (hard-refuse rule)**: every concurrent worker
    gets a DISTINCT provider platform, so before launching a swarm run
-   `python3 scripts/swarm_capacity.py <wire_class> <manifest_max_parallel>` and
+   `python3 /home/ajo/ringer/scripts/swarm_capacity.py <wire_class> <manifest_max_parallel>` and
    pass the printed number as `--max-parallel`; re-query per round. If the
    endpoint isn't up, fall back to the manifest value and rely on Feeder
    backpressure.
@@ -312,7 +312,7 @@ someone's untracked scratch files.
 
 ## Post-run review ritual
 
-0. **Enrich Feeder-routed runs first** (this machine): `python3 scripts/feeder_enrich.py
+0. **Enrich Feeder-routed runs first** (this machine): `python3 /home/ajo/ringer/scripts/feeder_enrich.py
    --state ~/.ringer/runs/<run_id>.json --workdir <workdir>` pulls each worker's true
    routing (served models, failovers, latency) from Feeder into the state, and the
    report pages then show a "Served by" strip per task. Re-render a finished run's
@@ -336,7 +336,7 @@ someone's untracked scratch files.
 ## Grading rubric — the quality feed (THIS MACHINE, Adam's directive 2026-07-14)
 
 After the post-run review, grade each worker's output 0..1 and feed it to the fleet's
-routing brain: `python3 scripts/quality_feed.py --state ~/.ringer/runs/<run>.json
+routing brain: `python3 /home/ajo/ringer/scripts/quality_feed.py --state ~/.ringer/runs/<run>.json
 --grade <key>=<score> ... --post` (enrich the state first — ritual step 0). The score
 is your considered judgment of BOTH the executed-check result and output quality,
 keyed to the concrete served model. Anchors — stay on them, the EWMA amplifies
