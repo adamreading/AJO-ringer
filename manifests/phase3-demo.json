@@ -1,0 +1,43 @@
+{
+  "run_name": "phase3-demo",
+  "workdir": "/tmp/ringer-phase3-demo",
+  "max_parallel": 3,
+  "tasks": [
+    {
+      "key": "alpha",
+      "task_type": "probe",
+      "wire_class": "coding",
+      "engine": "opencode",
+      "model": "feeder/auto/coding",
+      "spec": "Create alpha.txt in the current working directory containing exactly: alpha ready. Do not write any other files.",
+      "check": "test \"$(cat alpha.txt 2>/dev/null)\" = \"alpha ready\" || { echo 'FAIL: alpha.txt missing or content is not alpha ready'; exit 1; }",
+      "expect_files": ["alpha.txt"],
+      "timeout_s": 300,
+      "verified": "alpha.txt exists and contains exactly the expected line — the built-in demo's alpha task, served through Feeder"
+    },
+    {
+      "key": "bravo",
+      "task_type": "probe",
+      "wire_class": "coding",
+      "engine": "opencode",
+      "model": "feeder/auto/coding",
+      "spec": "Create bravo.txt in the current working directory containing exactly: bravo ready. Do not write any other files.",
+      "check": "test \"$(cat bravo.txt 2>/dev/null)\" = \"bravo ready\" || { echo 'FAIL: bravo.txt missing or content is not bravo ready'; exit 1; }",
+      "expect_files": ["bravo.txt"],
+      "timeout_s": 300,
+      "verified": "bravo.txt exists and contains exactly the expected line — the built-in demo's bravo task, served through Feeder"
+    },
+    {
+      "key": "charlie",
+      "task_type": "probe",
+      "wire_class": "coding",
+      "engine": "opencode",
+      "model": "feeder/auto/coding",
+      "spec": "Create charlie.txt in the current working directory containing exactly: charlie ready. Do not write any other files.",
+      "check": "test \"$(cat charlie.txt 2>/dev/null)\" = \"charlie ready\" || { echo 'FAIL: charlie.txt missing or content is not charlie ready'; exit 1; }",
+      "expect_files": ["charlie.txt"],
+      "timeout_s": 300,
+      "verified": "charlie.txt exists and contains exactly the expected line — the built-in demo's charlie task, served through Feeder"
+    }
+  ]
+}
