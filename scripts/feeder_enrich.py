@@ -45,12 +45,21 @@ def main():
         if not task_key:
             continue
 
-        worker_log_path = os.path.join(args.workdir, task_key, "worker.log")
-        
-        try:
-            with open(worker_log_path, "r", encoding="utf-8") as f:
-                log_content = f.read()
-        except OSError:
+        # non-worktrees layout first; worktrees mode keeps logs outside the
+        # (deleted-on-PASS) task worktree, under <workdir>/logs/
+        candidate_logs = [
+            os.path.join(args.workdir, task_key, "worker.log"),
+            os.path.join(args.workdir, "logs", f"{task_key}.worker.log"),
+        ]
+        log_content = None
+        for worker_log_path in candidate_logs:
+            try:
+                with open(worker_log_path, "r", encoding="utf-8") as f:
+                    log_content = f.read()
+                break
+            except OSError:
+                continue
+        if log_content is None:
             print(f"Note: task {task_key}: worker.log missing, skipping")
             continue
 

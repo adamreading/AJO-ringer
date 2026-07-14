@@ -3527,8 +3527,8 @@ def render_feeder_strip(task_dict: dict[str, Any]) -> str:
     if isinstance(failovers, int) and failovers > 0:
         strip += f" · {failovers} failover{'s' if failovers != 1 else ''}"
     latency_ms_p50 = feeder.get("latency_ms_p50")
-    if isinstance(latency_ms_p50, int):
-        strip += f" · p50 {latency_ms_p50}ms"
+    if isinstance(latency_ms_p50, (int, float)) and not isinstance(latency_ms_p50, bool):
+        strip += f" · p50 {round(latency_ms_p50)}ms"
     return strip
 
 
