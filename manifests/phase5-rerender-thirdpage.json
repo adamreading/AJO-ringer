@@ -1,0 +1,20 @@
+{
+  "run_name": "phase5-quality-feed",
+  "workdir": "/tmp/ringer-rerender3",
+  "worktrees": true,
+  "repo": "/home/ajo/ringer",
+  "max_parallel": 1,
+  "tasks": [
+    {
+      "key": "rerender-thirdpage",
+      "task_type": "code-fix",
+      "wire_class": "coding",
+      "engine": "opencode",
+      "model": "feeder/auto/coding",
+      "spec": "You are a Ringer worker making ONE small fix to ONE existing file in a git worktree of the ringer repo. Your current working directory IS that worktree — edit files here directly, leave ALL changes uncommitted (never run git commit; the check exports your diff as a patch). You own EXACTLY ONE file: scripts/feeder_enrich.py. Do not modify any other file.\n\nCONTEXT: scripts/feeder_enrich.py has a --rerender flag that re-renders a run's artifact pages after enrichment. Today it rewrites TWO pages: {artifacts_dir}/{run_id}-report.html and {artifacts_dir}/live/{run_name}.html, both via ringer.render_final_report_html. BUG FOUND IN THE FIELD: the artifact LIBRARY links to a THIRD page — {artifacts_dir}/{run_id}.html (the run's live-status page) — which --rerender never touches, so users opening a run from the library see stale, un-enriched content.\n\nIMPLEMENT: in the --rerender block, ALSO re-render {artifacts_dir}/{run_id}.html when it exists — but with its NATIVE renderer: ringer.render_status_html(state, renderer, page_path=<that path>) — note render_status_html takes the renderer as the SECOND POSITIONAL argument (signature: render_status_html(state, renderer=None, *, force_wrappers=False, page_path=None)), unlike render_final_report_html which takes renderer as a keyword. Keep the other two pages exactly as they are (render_final_report_html). Same rules as the existing pages: only render it if the file already exists (skip with a printed note otherwise, never create), print one line when written, never touch any other file in the artifacts dir.\n\nHOW TO VERIFY (this exact command is the task's check — run it yourself from the worktree root until it passes): sh /home/ajo/ringer/scripts/checks/phase5_rerender_check.sh\nThe check now asserts ALL THREE pages ({run_id}-report.html, live/{run_name}.html, {run_id}.html) carry the 'Served by' strip after --rerender, the stray other-run page is untouched, and the no-flag path still works.\n\nHARD RULES: only scripts/feeder_enrich.py may change; the edit is a few lines inside the existing --rerender block; no git commit; write nothing outside the worktree except what the check itself exports.",
+      "check": "mkdir -p /tmp/ringer-rerender3/patches && git add -A && git diff --cached > /tmp/ringer-rerender3/patches/thirdpage.patch && sh /home/ajo/ringer/scripts/checks/phase5_rerender_check.sh",
+      "timeout_s": 600,
+      "verified": "feeder_enrich --rerender now rewrites all three of the run's artifact pages (report, live, and the library-linked status page) with the telemetry strips, using each page's native renderer"
+    }
+  ]
+}

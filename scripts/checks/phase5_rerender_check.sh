@@ -28,6 +28,7 @@ fixture.write_text(json.dumps({"ses_test1": [
 art = tmp / "artifacts"; (art / "live").mkdir(parents=True)
 report = art / "check-run-id-report.html"; report.write_text("stub")
 live = art / "live" / "check-run-name.html"; live.write_text("stub")
+status_page = art / "check-run-id.html"; status_page.write_text("stub")
 stray = art / "live" / "other-run.html"; stray.write_text("stub")
 
 proc = subprocess.run(
@@ -39,7 +40,7 @@ if proc.returncode != 0:
     print("FAIL: exited", proc.returncode); print(proc.stdout); print(proc.stderr); sys.exit(1)
 
 problems = []
-for out in (report, live):
+for out in (report, live, status_page):
     html = out.read_text()
     if "served by" not in html.lower():
         problems.append(f"{out.name} has no 'Served by' strip after --rerender")
