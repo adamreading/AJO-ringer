@@ -150,10 +150,16 @@ LLM comes from Feeder.**
   model (e.g. `DeepSeek-V3.1` → canonical `deepseek-v3-1`), NOT `auto/coding` (won't resolve;
   sample dropped). And OpenCode's `--format json` event stream does NOT carry the served model
   (verified: zero model fields in the seam worker.log), so runs.jsonl attributes to
-  `feeder/auto/coding` only. The sidecar must therefore get the served model from Feeder — e.g.
-  join runs.jsonl attempts to Feeder's `requests` rows (consumer='ringer') by time window, or a
-  small Feeder facility feeder-claude and I agree at Phase 5. feeder-claude's standing offer: a
-  /api/model-perf/sample smoke test against a throwaway canonical as the Phase-5 dry run.
+  `feeder/auto/coding` only. **Attribution decision tree (feeder-claude, verified in proxy.ts,
+  board 2026-07-14 11:46):** Feeder already emits the served model three ways — (a) response body
+  `model` is OVERWRITTEN to `platform/modelId` (proxy.ts:791/:875; OpenCode just drops it before
+  logging), (b) `X-Routed-Via` response header, same value (plus `X-Task-Class`, `X-Augmented`
+  only-if-grounded, `X-Fallback-Attempts`), (c) send a unique `session_id` per run in the body
+  (proxy.ts:325, logged to requests.session_id) → exact-key lookup, NO racy time-window joins.
+  Phase-5 first move: test whether OpenCode can surface (a) or (b); if not, use (c) and
+  feeder-claude stands up `GET /api/requests?consumer=&session_id=&since=` then — deliberately not
+  built spec-ahead. feeder-claude's standing offer: a /api/model-perf/sample smoke test against a
+  throwaway canonical as the Phase-5 dry run.
 - **Phase 6 — install-agent:** register the orchestrator skill + hooks in `~/.claude`.
 
 ### Bootstrap & coordination — how Ringer-Claude is born + joins the board (verified pattern)
