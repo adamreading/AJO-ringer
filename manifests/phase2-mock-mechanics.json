@@ -1,0 +1,37 @@
+{
+  "run_name": "phase2-mock-mechanics",
+  "workdir": "/tmp/ringer-mock-mechanics",
+  "max_parallel": 3,
+  "tasks": [
+    {
+      "key": "alpha-plainfile",
+      "task_type": "probe",
+      "engine": "mock",
+      "spec": "You are a zero-cost mock mechanics worker proving Ringer's spawn/check/log loop before any real model spends tokens. Boundary: write only inside your current task directory; never touch anything else. Goal: produce alpha.txt containing exactly one line: 'ringer mechanics alpha ready'. This spec drives engines/mock_worker.py, which writes the MOCK_FILE block below verbatim into the task directory.\nMOCK_FILE: alpha.txt\nringer mechanics alpha ready\nMOCK_END",
+      "check": "printf 'ringer mechanics alpha ready\\n' | diff - alpha.txt && echo 'alpha.txt matches expected content exactly'",
+      "expect_files": ["alpha.txt"],
+      "timeout_s": 60,
+      "verified": "alpha.txt exists and byte-for-byte matches the expected single line (diff, not diff -q, so a mismatch prints the difference)"
+    },
+    {
+      "key": "beta-nested-report",
+      "task_type": "probe",
+      "engine": "mock",
+      "spec": "You are a zero-cost mock mechanics worker proving Ringer handles nested-directory deliverables. Boundary: write only inside your current task directory. Goal: produce report/beta.md — a two-section markdown report proving directory creation works. This spec drives engines/mock_worker.py, which writes the MOCK_FILE block below verbatim (creating parent directories as needed).\nMOCK_FILE: report/beta.md\n# Beta mechanics report\n\n## Findings\nNested directory write path works: this file was created at report/beta.md by the mock worker.\n\n## Verdict\nmechanics-pass\nMOCK_END",
+      "check": "grep -qi '^## findings' report/beta.md || { echo 'FAIL: missing Findings section in report/beta.md'; exit 1; }; grep -qi '^## verdict' report/beta.md || { echo 'FAIL: missing Verdict section'; exit 1; }; grep -q 'mechanics-pass' report/beta.md || { echo 'FAIL: verdict marker mechanics-pass absent'; exit 1; }; echo 'beta.md has Findings + Verdict sections and the mechanics-pass marker'",
+      "expect_files": ["report/beta.md"],
+      "timeout_s": 60,
+      "verified": "report/beta.md exists in a nested directory and contains Findings and Verdict sections plus the mechanics-pass marker (each missing piece named on failure)"
+    },
+    {
+      "key": "gamma-valid-json",
+      "task_type": "probe",
+      "engine": "mock",
+      "spec": "You are a zero-cost mock mechanics worker proving Ringer's checks can execute an artifact, not just see it exists. Boundary: write only inside your current task directory. Goal: produce gamma.json — a machine-parseable status file. This spec drives engines/mock_worker.py, which writes the MOCK_FILE block below verbatim.\nMOCK_FILE: gamma.json\n{\"component\": \"ringer-mechanics\", \"status\": \"ready\", \"phase\": 2}\nMOCK_END",
+      "check": "python3 -m json.tool gamma.json > /dev/null || { echo 'FAIL: gamma.json is not valid JSON:'; cat gamma.json; exit 1; }; python3 -c \"import json,sys; d=json.load(open('gamma.json')); sys.exit(0 if d.get('status')=='ready' else ('FAIL: status is %r, expected ready' % d.get('status'), 1)[1])\" && echo 'gamma.json parses and status==ready'",
+      "expect_files": ["gamma.json"],
+      "timeout_s": 60,
+      "verified": "gamma.json parses as real JSON and its status field equals 'ready' — the check executes the artifact through a parser rather than trusting existence"
+    }
+  ]
+}

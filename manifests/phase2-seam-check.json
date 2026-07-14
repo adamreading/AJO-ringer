@@ -1,0 +1,18 @@
+{
+  "run_name": "phase2-seam-check",
+  "workdir": "/tmp/ringer-seam-check",
+  "max_parallel": 1,
+  "tasks": [
+    {
+      "key": "seam-probe",
+      "task_type": "probe",
+      "engine": "opencode",
+      "model": "feeder/auto/coding",
+      "spec": "You are the first real Ringer worker on this machine, and this task is the Phase-2 seam probe: your LLM calls are served by the Feeder router, and this run proves that seam end to end. Boundary: work only inside your current task directory; you own exactly one file, seam.py; do not create, modify, or read anything else, do not run git, do not install anything. Goal: create seam.py, a Python 3 script that when executed with 'python3 seam.py' prints exactly one line to stdout: feeder seam ok. No extra output, no trailing whitespace beyond the single newline. Keep the script minimal (a single print statement is correct).",
+      "check": "python3 seam.py > __check_out.txt 2>&1 || { echo 'FAIL: seam.py exited nonzero, output was:'; cat __check_out.txt; exit 1; }; printf 'feeder seam ok\\n' | diff - __check_out.txt && echo 'seam.py executed and printed exactly: feeder seam ok'",
+      "expect_files": ["seam.py"],
+      "timeout_s": 300,
+      "verified": "seam.py was actually executed by the check and printed exactly the expected line — proving a Feeder-served worker produced running code"
+    }
+  ]
+}

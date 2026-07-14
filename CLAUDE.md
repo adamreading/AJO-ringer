@@ -37,9 +37,19 @@ node .claude/coordination/coord.js msg "@wsl ..." # post (you appear as @ringer-
   first boot and stored in Feeder's DB (settings table, key `unified_api_key`). Fetch at runtime via
   `GET /api/settings/api-key` → `{apiKey}`; send as `Authorization: Bearer <key>` to `/v1` (localhost
   is trusted tokenless, but send the Bearer anyway so it also works over the LAN).
-- **Neither `opencode` nor `codex` is installed yet.** Phase 2 installs the worker harness (OpenCode).
+- **OpenCode 1.17.20 installed** (2026-07-14) at `~/.opencode/bin/opencode` via the official
+  user-level installer (npm -g hit EACCES). `codex` still not installed. OpenCode 1.17.20 flag
+  drift vs the sample config: `--dangerously-skip-permissions` is gone → use `--auto`; no sandbox
+  flags at all. Provider wiring lives in `~/.config/opencode/opencode.json` (feeder provider,
+  chmod 600, unified key inlined); engine block `[engines.opencode]` in `~/.config/ringer/config.toml`.
+  **Phase-2 seam check PASSED first-try 2026-07-14** (`phase2-seam-check`, 7238 tok, 15.9s, cost 0);
+  Feeder-side row confirmation requested from feeder-claude on the board.
 - `engines/mock_worker.py` exists → use it for a **zero-cost mechanics test** of the orchestrator
-  before spending on real workers.
+  before spending on real workers. (Done 2026-07-14: 3/3 first-try PASS, `phase2-mock-mechanics`.)
+- **Checks execute under `/bin/sh` (dash), NOT bash** — write POSIX checks only; a bashism like
+  `<(...)` fails the check with rc=2 even when the worker succeeded (learned live 2026-07-14).
+- **Retry-prompt quirk with mock engine:** the injected failure context embeds the attempt-1 log,
+  which can re-trigger `MOCK_FILE:` parsing (unterminated block). Harmless for real engines.
 - **Eval backend stays `jsonl`** (`~/.ringer/runs.jsonl`) — NO Supabase. (Egress discipline: the OB
   Supabase org just blew its free egress cap; never point eval at OB's PostgREST. If cross-machine
   aggregation is ever truly needed: direct libpq on a SEPARATE db, per OB-Claude.)
