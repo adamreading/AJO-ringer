@@ -214,7 +214,22 @@ LLM comes from Feeder.**
   manual-restart, SPOF risk accepted, revisit later.) Also
   confirmed: swarm calls land latency_ms/tokens passively in requests like all traffic — p95
   health covers swarm models with no extra probing.
+- **Phase 5 status: ✅ DONE 2026-07-14.** `scripts/quality_feed.py` (swarm-built) live end-to-end:
+  smoke-tested against a throwaway canonical (seed + EWMA verified), then the FIRST REAL SAMPLE
+  landed and was CONFIRMED feeder-side (canonical deepseek-v3-1, task_type coding, score 0.95,
+  evidence 'realtime_quality via ringer', 15:19:03) — orchestrator judgment now blends into fleet
+  routing (0.6 prior / 0.4 realtime). Mixed-model skip-with-count fired correctly on its first
+  real runs; ok:false rejections handled; grading rubric in the skill.
 - **Phase 6 — install-agent:** register the orchestrator skill + hooks in `~/.claude`.
+  **✅ DONE 2026-07-14.** User-scope install verified: skill (incl. this machine's wire-class
+  contract + grading rubric) at `~/.claude/skills/ringer/SKILL.md`; PreToolUse-Bash +
+  PostToolUse-Edit|Write nudge hooks MERGED into `~/.claude/settings.json` (coord hooks
+  preserved; pre-install snapshot in session scratchpad). Hooks verified non-blocking (exit 0)
+  and the pre-bash nudge fired live in the orchestrator's own session on a model-calling
+  command — enforcement demonstrably working. NOTE: ~/.claude is shared by all fleet Claudes on
+  this user — they'll see the once-per-session nudge too; `./ringer.py uninstall-agent` reverts.
+
+## V1 COMPLETE — 2026-07-14. All six phases done, both seams verified live from both sides.
 
 ### Post-v1 backlog (parked, Adam 2026-07-14 14:13 — "fix later", not blocking)
 - **Telemetry UX polish:** (1) surface served-model/failover telemetry at the ROUND-summary

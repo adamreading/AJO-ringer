@@ -129,8 +129,11 @@ still gated behind Adam for anything consequential. (Relevant now that workers r
 5. **Root-cause over band-aid; evidence over assertion.**
 
 ## Scope
-- **v1** = Phases 1→6 in `RINGER-PLAN.md`: scaffold (done) → Feeder-seam verify → prove Ringer (demo +
-  Ringside) → first real manifest → quality-feedback sidecar → `install-agent`.
+- **v1 = ✅ COMPLETE (2026-07-14, all six phases, both seams verified live from both sides).**
+  Operating loop now: manifests through the Feeder-backed opencode engine (pre-launch ritual:
+  lint + `scripts/wire_class.py` + `scripts/swarm_capacity.py`), post-run ritual step 0 =
+  `scripts/feeder_enrich.py`, review + grade per the skill rubric, feed via
+  `scripts/quality_feed.py --post`. Post-v1 backlog lives in `RINGER-PLAN.md`.
 - **Open Engine executor** (Ringer running verifiable code-cards behind the human gate) = explicitly a
   LATER phase, NOT v1.
 - License: Ringer is **PolyForm Shield 1.0.0** — usable/modifiable, cannot be resold as a competing product.
