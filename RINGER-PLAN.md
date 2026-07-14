@@ -147,6 +147,18 @@ LLM comes from Feeder.**
   overlapping, ~7.2k tok each, $0), full pre-launch ritual exercised end-to-end
   (lint + wire_class + capacity 11 lanes). Artifacts spot-checked; session ids handed to
   feeder-claude for the served-model lookup (first real use of the requests.session_id join).
+  **Feeder-side reconciliation (12:52):** all 3 workers CONVERGED on sambanova/DeepSeek-V3.1 (no
+  natural spread) → 2 provider 429s at just 3 workers → transparent failover to
+  nvidia/mistral-large-3 rescued alpha+bravo (invisible client-side; my "no 429s" was
+  caller-view only). Live justification for anti-affinity #3 (efficiency/cache, not correctness —
+  failover preserved the result). Session-id join validated end-to-end first try.
+  **NEW Phase-5 wrinkle (mine, from this data): MIXED-MODEL ATTEMPTS.** Under failover one
+  attempt can be served by TWO models (alpha/bravo: DeepSeek ×2 calls + Mistral ×1). The graded
+  quality sample keys on ONE model — sidecar needs an attribution rule for mixed attempts.
+  Options: (a) skip mixed attempts (clean but loses data), (b) attribute to the majority-call
+  model, (c) attribute to the final-call model (it produced the artifact). Decide at Phase 5
+  with feeder-claude; #3 will make mixed attempts rare (spread from first call → fewer
+  failovers) but 429-failover can still occur mid-attempt.
 - **Phase 4 — First real manifest:** one small real task, run through the Feeder-backed swarm at low
   parallelism, check passes end-to-end.
 - **Phase 5 — Quality feedback:** the runs.jsonl → `/api/model-perf/sample` sidecar (body:
