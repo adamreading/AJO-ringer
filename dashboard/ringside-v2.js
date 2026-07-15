@@ -796,6 +796,12 @@
     return '';
   }
 
+  /** Stringify a tool input/output value for display (objects → pretty JSON). */
+  function stringify(v) {
+    if (typeof v === 'string') return v;
+    try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); }
+  }
+
   /** One conversation turn → a chat bubble. */
   function renderTurn(turn) {
     var wrap = el('div', { className: 'turn', attrs: { 'data-role': turn.role || '', 'data-kind': turn.kind || '' } });
@@ -893,6 +899,9 @@
       state.expandedWorkers.delete(compositeKey);
     } else {
       state.expandedWorkers.set(compositeKey, true);
+      // fetch immediately so the conversation + log show at once, not on the next poll
+      fetchExpandedTranscripts();
+      fetchExpandedWorkerLogs();
     }
     render();
   }
