@@ -4502,6 +4502,84 @@ def live_model_for_task(state_dir: Path, run_id: str, task_key: str) -> dict:
     return payload
 
 
+_CANON_CACHE: dict[str, tuple[float, list]] = {}
+_CANON_LOCK = threading.Lock()
+CANON_TTL_S = 60.0
+
+
+def feeder_canon(feeder_base: str = "http://localhost:3001") -> list:
+    """Feeder's real canonical model catalog (/api/canon) — 106+ models with per-class
+    taskScores (benchmark + Ringer's realtime_quality grades), instances (platform, cost,
+    speed/intelligence rank, health), and capabilities. Cached (catalog changes slowly),
+    fail-open to [] when Feeder is unreachable."""
+    now = time.monotonic()
+    with _CANON_LOCK:
+        hit = _CANON_CACHE.get("v")
+        if hit is not None and hit[0] > now:
+            return hit[1]
+    data: list = []
+    try:
+        req = urllib.request.Request(f"{feeder_base}/api/canon", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            parsed = json.loads(resp.read().decode("utf-8"))
+        if isinstance(parsed, list):
+            data = parsed
+        elif isinstance(parsed, dict):
+            data = parsed.get("models") or parsed.get("canon") or parsed.get("canonical") or []
+    except Exception:
+        data = []
+    with _CANON_LOCK:
+        _CANON_CACHE["v"] = (now + CANON_TTL_S, data)
+    return data
+
+
+def ringer_usage_payload(state_dir: Path) -> dict:
+    """Ringer's OWN run outcomes keyed on the REAL served model x task-class — the
+    ground-truth (executed-check) half of the quality loop. Scans run states for tasks
+    that carry a feeder.served block (enriched runs); attributes each to its dominant
+    served model and the wire-class parsed from the routed slug (feeder/auto/<class>)."""
+    rows: dict[tuple[str, str], dict] = {}
+    try:
+        files = sorted((state_dir / "runs").glob("*.json"))
+    except Exception:
+        files = []
+    for f in files:
+        state = read_json_object(f, {})
+        for task in (state.get("tasks") or []):
+            if not isinstance(task, dict):
+                continue
+            served = (task.get("feeder") or {}).get("served") or []
+            if not served:
+                continue
+            best = max(served, key=lambda s: s.get("calls", 0) or 0)
+            served_model = f"{best.get('platform')}/{best.get('model_id')}"
+            model = str(task.get("model") or "")
+            wire_class = model.split("auto/", 1)[-1] if "auto/" in model else "overall"
+            passed = task.get("status") == "pass"
+            attempts = task.get("attempts") or 1
+            key = (served_model, wire_class)
+            r = rows.setdefault(key, {
+                "served_model": served_model, "task_class": wire_class,
+                "tasks": 0, "passes": 0, "first_try": 0, "tokens": 0,
+            })
+            r["tasks"] += 1
+            r["tokens"] += int(task.get("tokens") or 0)
+            if passed:
+                r["passes"] += 1
+                if attempts <= 1:
+                    r["first_try"] += 1
+    usage = []
+    for r in rows.values():
+        t = r["tasks"] or 1
+        usage.append({
+            **r,
+            "pass_rate": round(r["passes"] / t, 3),
+            "first_try_pass_rate": round(r["first_try"] / t, 3),
+        })
+    usage.sort(key=lambda x: (-x["tasks"], x["served_model"]))
+    return {"generated_at": utc_now_iso(), "usage": usage}
+
+
 def serve_artifact_path(handler: BaseHTTPRequestHandler, artifact_root: Path, path: str) -> bool:
     artifact_path = resolve_artifact_http_path(artifact_root, path)
     if artifact_path is None:
@@ -4583,6 +4661,14 @@ class PersistentHudServer:
                             "error": str(exc) or exc.__class__.__name__,
                         }
                     send_json_response(self, payload)
+                    return
+                if path == "/api/canon":
+                    # Feeder's real model catalog (proxied same-origin, cached, fail-open).
+                    send_json_response(self, {"models": feeder_canon(), "generated_at": utc_now_iso()})
+                    return
+                if path == "/api/usage":
+                    # Ringer's own served-model x task-class run outcomes (for the quality-loop view).
+                    send_json_response(self, ringer_usage_payload(state_dir))
                     return
                 if path.startswith("/api/open-folder"):
                     query = urllib.parse.urlparse(path).query
