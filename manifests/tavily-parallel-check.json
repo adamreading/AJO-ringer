@@ -1,0 +1,59 @@
+{
+  "run_name": "tavily-parallel-check",
+  "workdir": "/tmp/rtav",
+  "max_parallel": 4,
+  "tasks": [
+    {
+      "key": "node",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": ["--agent", "researcher"],
+      "timeout_s": 300,
+      "spec": "You have LIVE web access via a Tavily search tool; your training data is stale, so search rather than answer from memory. Find the CURRENT latest stable release version of Node.js and its release date. Cross-check across at least two sources (e.g. nodejs.org and one other). Write ONLY the bare relative filename report.md in your current working directory with these sections:\n## Answer\nThe latest stable version and date, one or two sentences.\n## Sources\nBulleted list of the full https:// URLs you actually opened (at least two).\nCreate only report.md; do not use an absolute path; do not modify any other file.",
+      "check": "sh /home/ajo/ringer/scripts/checks/tavily_research_check.sh",
+      "verified": "report.md cites >=2 sources AND worker.log has a Tavily tool_use (executed)",
+      "expect_files": ["report.md"]
+    },
+    {
+      "key": "python",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": ["--agent", "researcher"],
+      "timeout_s": 300,
+      "spec": "You have LIVE web access via a Tavily search tool; your training data is stale, so search rather than answer from memory. Find the CURRENT latest stable release version of CPython (python.org) and its release date. Cross-check across at least two sources. Write ONLY the bare relative filename report.md in your current working directory with these sections:\n## Answer\nThe latest stable version and date, one or two sentences.\n## Sources\nBulleted list of the full https:// URLs you actually opened (at least two).\nCreate only report.md; do not use an absolute path; do not modify any other file.",
+      "check": "sh /home/ajo/ringer/scripts/checks/tavily_research_check.sh",
+      "verified": "report.md cites >=2 sources AND worker.log has a Tavily tool_use (executed)",
+      "expect_files": ["report.md"]
+    },
+    {
+      "key": "go",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": ["--agent", "researcher"],
+      "timeout_s": 300,
+      "spec": "You have LIVE web access via a Tavily search tool; your training data is stale, so search rather than answer from memory. Find the CURRENT latest stable release version of the Go programming language (go.dev) and its release date. Cross-check across at least two sources. Write ONLY the bare relative filename report.md in your current working directory with these sections:\n## Answer\nThe latest stable version and date, one or two sentences.\n## Sources\nBulleted list of the full https:// URLs you actually opened (at least two).\nCreate only report.md; do not use an absolute path; do not modify any other file.",
+      "check": "sh /home/ajo/ringer/scripts/checks/tavily_research_check.sh",
+      "verified": "report.md cites >=2 sources AND worker.log has a Tavily tool_use (executed)",
+      "expect_files": ["report.md"]
+    },
+    {
+      "key": "rust",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": ["--agent", "researcher"],
+      "timeout_s": 300,
+      "spec": "You have LIVE web access via a Tavily search tool; your training data is stale, so search rather than answer from memory. Find the CURRENT latest stable release version of the Rust programming language (rust-lang.org) and its release date. Cross-check across at least two sources. Write ONLY the bare relative filename report.md in your current working directory with these sections:\n## Answer\nThe latest stable version and date, one or two sentences.\n## Sources\nBulleted list of the full https:// URLs you actually opened (at least two).\nCreate only report.md; do not use an absolute path; do not modify any other file.",
+      "check": "sh /home/ajo/ringer/scripts/checks/tavily_research_check.sh",
+      "verified": "report.md cites >=2 sources AND worker.log has a Tavily tool_use (executed)",
+      "expect_files": ["report.md"]
+    }
+  ]
+}

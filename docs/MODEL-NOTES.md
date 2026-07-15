@@ -353,3 +353,19 @@ checks and raw logs support — no vibes, no worker self-reports.
   binary — i.e. it genuinely came from the web, not priors. Takeaway: for
   research, pair `feeder/auto/reasoning` with `--agent researcher`; the check
   must assert a Tavily tool_use in the raw log (URLs alone can be hallucinated).
+
+- 2026-07-15 — INCIDENT + FIX (feeder-claude's feeder-budget-curation, 10 research
+  tasks at --max-parallel 10 via the researcher/Tavily agent). Two root causes,
+  both non-Ringer: (1) STARTUP STALL — each opencode run cold-spawned its own
+  Tavily MCP via `npx -y tavily-mcp`; 10 concurrent npm cold-resolves contended on
+  the cache lock and ~2 workers sat ~390s in startup (zero events) until the 420s
+  task timeout killed + retried them. Ringer's timeout+retry behaved correctly; no
+  process leak (transient spawn overlap only). FIX: installed tavily-mcp once to
+  ~/.local/share/tavily-mcp and pointed opencode.json's MCP command at the node
+  binary (no npx per run). Verified (tavily-parallel-check, 4-way): startup dropped
+  from ~390s to 3-19s, 4/4 pass, live post-cutoff answers. (2) PATH-MANGLE — a
+  worker told to write ./report.md instead built an ABSOLUTE path and dropped 4 hex
+  chars of the long taskdir UUID -> file written to a nonexistent dir -> check
+  failed (opencode's write tool flagged exists:false). FIX: added a "write the BARE
+  relative filename, never an absolute path" rule to the researcher agent prompt;
+  keep research workdirs SHORT. Standing guidance: cap Tavily research swarms ~4-5.
