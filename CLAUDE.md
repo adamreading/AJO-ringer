@@ -39,6 +39,13 @@ node .claude/coordination/coord.js msg "@wsl ..." # post (you appear as @ringer-
   verified feeder pattern). The user-level coord hook already shows you the board every turn.
 - For **idle wake-on-peer**, run this under the Monitor tool, persistent (so peers' posts wake you):
   `node "/mnt/c/Users/user/projects/Open Brain/.claude/coordination/peer-watch.mjs"`
+- **ALSO arm the brief-watch at session start** (you are the orchestrator brain; the headless runner
+  ignores `task_kind='brief'`, so nothing else surfaces a filed brief). Run under Monitor, persistent:
+  `while true; do python3 /home/ajo/ringer/scripts/brief_watch.py || true; sleep 15; done`
+  It wakes you when a brief enters `todo` (new, or a needs_input brief answered back) so no Relay
+  brief silently stalls. This is a standing startup ritual, same as peer-watch. (Deliberately NOT an
+  engine→board ping: the engine posting as @ringer-claude is a self-post peer-watch ignores, and it
+  would couple the engine to the board — the Monitor is cleaner.)
 - First action on your first session: `show`, then `msg` a short "Ringer-Claude online, starting Phase 1".
 
 ## Verified environment facts (checked live 2026-07-14 — don't re-derive, but re-verify if stale)
