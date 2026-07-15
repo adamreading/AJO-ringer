@@ -126,29 +126,36 @@ model_report_regex = "(?m)^model:[ \\t]*([^ \\t\\r\\n]+)[ \\t]*\\r?$"
 # sandbox_args = []
 # full_access_args = []
 
-# OpenCode + OpenRouter — the universal model harness. One engine block runs
-# ANY OpenRouter-served model: the {model} placeholder is filled per task from
-# the manifest's "model" field, falling back to model_default below. Example
-# default: GLM-5.2 (z-ai/glm-5.2, roughly $0.74/M input, $2.33/M output as of
-# 2026-07) — the cheap-intelligence lane.
-# OpenCode has no OS sandbox, so `bin` points at engines/opencode-sandboxed.sh
-# (macOS Seatbelt: network + reads open, writes confined to the task dir, a
-# per-run scratch dir, and OpenCode's state/config dirs). Auth: put your
-# OpenRouter key where your OpenCode version expects it — commonly
-# ~/.local/share/opencode/auth.json ({"openrouter": {"type": "api", "key": "..."}});
-# confirm the path with your installed CLI.
-# Per-task engine_args can set reasoning effort ("--variant", "low|high|max").
+# OpenCode through FEEDER — this fork's cheap-intelligence lane. Workers do NOT
+# talk to OpenRouter directly; they talk to Feeder (http://localhost:3001/v1),
+# which owns the model catalog and picks the model per request. The manifest's
+# "model" is a CLASS, not a model id: "feeder/auto/<class>" where <class> is one
+# of coding|reasoning|math|creative_writing|instruction_following|long_query|
+# multi_turn (bare "feeder/auto" = overall). Feeder chooses the best healthy
+# model for that class, fails over, and logs every call.
+#
+# `bin` points at engines/opencode-feeder.sh (NOT the macOS-only sandbox wrapper):
+# it gives each worker a private OpenCode state dir so parallel workers don't race
+# on OpenCode's sqlite, then execs the real opencode. It is state-isolation, not
+# an OS sandbox — on Linux/WSL rely on run-level "worktrees": true + the human gate.
+#
+# AUTH / KEY: not here. The OpenCode->Feeder provider lives in
+# ~/.config/opencode/opencode.json (baseURL http://localhost:3001/v1, headers
+# X-Consumer: ringer + X-Augment: off, a models map of the classes above). The
+# apiKey there is Feeder's UNIFIED key — fetch it once with
+#   curl -fsS http://localhost:3001/api/settings/api-key   # -> {"apiKey":"..."}
+# and paste it in (chmod 600 the file). localhost is trusted tokenless anyway.
+# Prereq: Feeder (github.com/adamreading/Agent-LLM-Feeder) must be running on :3001.
+# See the README "The cheap lane: OpenCode through Feeder" for the full setup.
 # Uncomment and set an absolute path for `bin` to enable.
 # [engines.opencode]
-# bin = "/absolute/path/to/ringer/engines/opencode-sandboxed.sh"
-# model_default = "openrouter/z-ai/glm-5.2"
+# bin = "/absolute/path/to/ringer/engines/opencode-feeder.sh"
+# model_default = "feeder/auto/coding"
 # args_template = [
-#   "{taskdir}",
-#   "{access_args}",
 #   "run",
 #   "-m",
 #   "{model}",
-#   "--dangerously-skip-permissions",
+#   "--auto",
 #   "--format",
 #   "json",
 #   "{engine_args}",
@@ -156,8 +163,6 @@ model_report_regex = "(?m)^model:[ \\t]*([^ \\t\\r\\n]+)[ \\t]*\\r?$"
 #   "{taskdir}",
 #   "{spec}",
 # ]
-# sandbox_args = []
-# full_access_args = ["--no-sandbox"]
 # token_regex = '"tokens":\{"total":([0-9]+)'
 
 [artifact]

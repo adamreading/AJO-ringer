@@ -41,7 +41,7 @@ codex login                    # sign in with your ChatGPT plan
 2. Get the repo:
 
 ```bash
-git clone https://github.com/NateBJones-Projects/ringer && cd ringer
+git clone https://github.com/adamreading/AJO-ringer ringer && cd ringer
 mkdir -p ~/.config/ringer && cp config.sample.toml ~/.config/ringer/config.toml   # optional — sane defaults without it
 ```
 
@@ -142,7 +142,7 @@ For CI and evals, `config.sample.toml` includes `[engines.mock]` so the enforcem
 
 ![Identical workers, each under its own light](docs/engines.png)
 
-Ringer ships with three worker lanes: **Codex CLI** is the built-in default, and `config.sample.toml` carries verified engine blocks for **Grok Build CLI** (works as-is once you `grok login`) and **OpenCode + OpenRouter** (one edit: point `bin` at the sandbox wrapper in your clone). Anything else with a headless CLI is a config block away:
+Ringer ships with worker lanes for **Codex CLI** (the built-in default), **Grok Build CLI** (works as-is once you `grok login`), and — the cheap-intelligence lane this fork is built around — **OpenCode through Feeder** (every worker's model is chosen by [Feeder](https://github.com/adamreading/Agent-LLM-Feeder), one router over the whole model catalog). Anything else with a headless CLI is a config block away:
 
 ```toml
 [engines.mymodel]
@@ -152,30 +152,59 @@ args_template = ["run", "{spec}", "--dir", "{taskdir}"]
 
 Per-task `"engine": "mymodel"` routes work to it — the invariants (stdin closed, process-group kill, executed verification, raw logs) apply to every engine identically.
 
-### The universal harness: OpenCode + OpenRouter
+### The cheap lane: OpenCode through Feeder
 
-Unless a model ships its own first-class harness (Codex does), OpenCode is the harness that runs it — one engine block covers every OpenRouter-served model. `config.sample.toml` includes a ready-to-uncomment engine whose `{model}` placeholder is filled per task from the manifest's `"model"` field, with `model_default` as the fallback. The shipped default is OpenRouter's `z-ai/glm-5.2` — roughly $0.74/M input and $2.33/M output (2026-07), about 20-30x cheaper output than frontier coding models; a complete write-code-and-pass-the-check task lands around a penny.
+This fork routes the OpenCode worker lane through **[Feeder](https://github.com/adamreading/Agent-LLM-Feeder)** — a local OpenAI-compatible router (`http://localhost:3001/v1`) that owns the model catalog and picks the model per request. You never wire an OpenRouter key into Ringer; you send Feeder a *class* (`feeder/auto/coding`, `feeder/auto/reasoning`, …) and Feeder chooses the best-scoring healthy model for that class, fails over automatically, and logs every call. One brain, one catalog, no per-model config drift. (The upstream direct-OpenRouter setup still works if you don't run Feeder — see [`docs/`] / git history — but the fork's default and everything below assume Feeder.)
 
-OpenCode ships no OS sandbox, so the engine's `bin` points at an absolute path to `engines/opencode-sandboxed.sh` (ringer does not resolve engine bins relative to the repo): a macOS Seatbelt wrapper that leaves network and reads open but confines writes to the task dir, a per-run scratch dir (wired as the agent's `TMPDIR`/`XDG_CACHE_HOME`), and OpenCode's own state/config dirs. Its `--dangerously-skip-permissions` flag only silences OpenCode's interactive prompts; Seatbelt is the actual containment. Task paths reach the profile as `sandbox-exec -D` parameters rather than string interpolation, so a task dir with quotes or parens can't inject sandbox rules. `--no-sandbox` is wired as the engine's `full_access_args`, so ringer's `allow_full_access` gate still governs escapes. Non-macOS installs need their own sandbox (or full-access mode).
+**Prerequisite: Feeder must be running.** Clone and start [Agent-LLM-Feeder](https://github.com/adamreading/Agent-LLM-Feeder) (`npm run dev` in its `server/`, Postgres up first); confirm it answers: `curl -fsS http://localhost:3001/api/requests?limit=1`.
 
-Setting it up takes about five minutes:
+Setup is two files:
 
-```bash
-# 1) Install the OpenCode CLI (pick one)
-curl -fsSL https://opencode.ai/install | bash
-# or: npm install -g opencode-ai
-# or: brew install anomalyco/tap/opencode
+**1) `~/.config/ringer/config.toml`** — the OpenCode engine points at this repo's Feeder wrapper (NOT the macOS sandbox wrapper; `opencode-feeder.sh` gives each worker a private OpenCode state dir so parallel workers don't race, and execs the real `opencode`):
 
-# 2) Connect OpenRouter — create a key at https://openrouter.ai/settings/keys
-opencode auth login   # select OpenRouter, paste the key
-
-# 3) In ~/.config/ringer/config.toml, uncomment [engines.opencode] and set
-#    bin to the ABSOLUTE path of engines/opencode-sandboxed.sh in this clone.
-#    (Linux/WSL: the wrapper is macOS-only — set bin to the opencode binary
-#    itself; there is no OS write-confinement then, so keep manifests scoped.)
+```toml
+[engines.opencode]
+bin = "/ABSOLUTE/PATH/TO/ringer/engines/opencode-feeder.sh"
+model_default = "feeder/auto/coding"
+args_template = ["run", "-m", "{model}", "--auto", "--format", "json", "{engine_args}", "--dir", "{taskdir}", "{spec}"]
+token_regex = '"tokens":\{"total":([0-9]+)'
 ```
 
-Route with per-task `"engine": "opencode"`, pick the model with per-task `"model": "openrouter/<any-model>"`, and set reasoning effort via `engine_args`: `["--variant", "low|high|max"]`. A sensible split: mechanical or tightly-specced tasks on the cheap lane, gnarly ones on your frontier engine — the executed check catches shortfalls either way, and `swarm_runs` rows tell you whether the cheap lane's pass rate holds.
+**2) `~/.config/opencode/opencode.json`** — an OpenCode provider that points at Feeder and carries the key. This is where the key lives:
+
+```json
+{
+  "provider": {
+    "feeder": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Feeder",
+      "options": {
+        "baseURL": "http://localhost:3001/v1",
+        "apiKey": "<FEEDER_UNIFIED_KEY>",
+        "headers": { "X-Consumer": "ringer", "X-Augment": "off" }
+      },
+      "models": {
+        "auto/coding": {}, "auto/reasoning": {}, "auto/math": {},
+        "auto/creative_writing": {}, "auto/instruction_following": {},
+        "auto/long_query": {}, "auto/multi_turn": {}, "auto": {}
+      }
+    }
+  }
+}
+```
+
+**Where the key comes from:** Feeder generates a single **unified API key** on first boot and stores it in its own database (settings table, `unified_api_key`) — there is no key file to copy. Fetch it once and paste it into `opencode.json` above:
+
+```bash
+curl -fsS http://localhost:3001/api/settings/api-key   # -> {"apiKey":"..."}
+chmod 600 ~/.config/opencode/opencode.json             # it now holds a secret
+```
+
+(localhost → Feeder is trusted tokenless, so the key is really only needed if you ever reach Feeder over the LAN — but set it so the same config works either way.) `X-Consumer: ringer` tags every call for attribution; `X-Augment: off` keeps code workers off web-grounding.
+
+Route with per-task `"engine": "opencode"` and `"model": "feeder/auto/<class>"` where `<class>` is one of the 7 wire-classes (`coding`, `reasoning`, `math`, `creative_writing`, `instruction_following`, `long_query`, `multi_turn`); bare `feeder/auto` classifies to `overall`. `scripts/wire_class.py` validates a manifest's classes before a run. A sensible split: mechanical or tightly-specced tasks on the Feeder lane, gnarly ones on your frontier engine — the executed check catches shortfalls either way, and the model log (`./ringer.py models`) tells you whether the cheap lane's pass rate holds.
+
+> **Containment note:** `opencode-feeder.sh` is a state-isolation wrapper, not an OS sandbox (the upstream `opencode-sandboxed.sh` Seatbelt profile is macOS-only). On Linux/WSL, worker containment comes from run-level `"worktrees": true` (an isolated git worktree per task) plus the human consequence-gate — keep manifests scoped and never let a worker's retry loop cross publish/deploy/delete/spend without you.
 
 ### The plan lane: Grok Build CLI
 
@@ -205,11 +234,13 @@ Ringside is a local web page — no install, no account, nothing leaves your mac
 ./ringer.py hud                 # or open it any time → http://127.0.0.1:8700
 ```
 
-The top of the page is the run's live results document: what the job is, a progress bar of rounds, and "The work" — every deliverable each worker filed, with a plain-English line saying what the check proved and the raw check output one click away. Below it, the agents: expand a worker to see the exact brief it was handed, which engine and model are typing, and its live work stream. Past runs stay in a versioned library, and a swarm whose orchestrator *died* without finishing gets its own unmissable state — the failure mode every dashboard forgets.
+This fork ships a rebuilt **v2 UI** (`dashboard/ringside-v2.html`, served on :8700):
 
-Multiple swarms at once is the designed-for case: run three batches under three identities and Ringside shows all three, live. `--browser` opens a simpler per-run fallback dashboard, and `--no-dashboard` runs headless.
+- **Agent video-wall** — runs group into *jobs* (rounds accumulate under one job); expand any worker and its main pane is the **live conversation between that agent and the orchestrator** — the brief it was handed, then its text / tool-call / step turns, and on a retry the orchestrator's "sent it back" reply. The raw log is one click away. Each worker shows the **real model that actually served it** (from Feeder), not the routed alias.
+- **Models page** — a best-model-per-class finder over Feeder's real catalog: pick a class and see the models ranked by score, with cost tier, speed/intelligence rank, context, and health. A ◉ marks scores that include Ringer's own graded runs (the quality loop).
+- **Analytics page** — your swarm's actual usage, keyed on the real served model × real class: first-try pass rate, volume, and where Ringer's executed-check grades have moved a model's Feeder score.
 
-A native desktop build (Tauri, under `hud/`) exists as a v0.1.1 prototype; the web dashboard is currently ahead of it — start there.
+Multiple swarms at once is the designed-for case: run batches under different identities and the wall shows them all, live. `--no-dashboard` runs headless. **:8700 is the only surface** — the old per-run dashboard on :8787 is disabled in this fork. (A parked macOS-only Tauri prototype lives under `hud/`; the web UI is the one to use.)
 
 ## The eval loop
 
@@ -311,7 +342,8 @@ Four rules are baked into every worker invocation. They all cost us real debuggi
 
 - Python 3.11+ (stdlib only; `psycopg` needed only for the optional Postgres eval backend)
 - At least one agent CLI (Codex works out of the box)
-- Rust toolchain, only if you're building Ringside from source
+- For the cheap lane: the [OpenCode CLI](https://opencode.ai) + **[Feeder](https://github.com/adamreading/Agent-LLM-Feeder)** running on `http://localhost:3001` (see "The cheap lane: OpenCode through Feeder")
+- Rust toolchain, only if you're building the parked Tauri app from source
 
 ![Between rounds](docs/between-rounds.png)
 
