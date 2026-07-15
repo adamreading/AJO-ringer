@@ -27,6 +27,66 @@ manifest.json ──▶ ringer.py ──▶ N parallel workers (codex exec, each
               Ringside, in the browser (live, all swarms, all identities)
 ```
 
+## The two-repo setup (Ringer + Feeder)
+
+Ringer runs as a pair with **[Feeder (Agent-LLM-Feeder)](https://github.com/adamreading/Agent-LLM-Feeder)**.
+Any agent can drive the swarm; nothing else is required.
+
+| Repo | Role | Endpoint |
+|---|---|---|
+| **[Feeder](https://github.com/adamreading/Agent-LLM-Feeder)** | The **model proxy** — one unified key, one catalog, routing + failover + quality scoring, and the swarm **spend-cap** + no-progress **circuit-breaker**. Every worker's LLM comes from here. | `http://localhost:3001/v1` |
+| **Ringer** (this repo) | The **orchestrator + swarm work-queue + agent-API + Ringside wall/kanban**. Files, claims, runs, and *verifies* swarm tasks; workers route their model calls **through Feeder**. | `http://localhost:8700` |
+
+**Stand it up:** run Feeder (see its [README](https://github.com/adamreading/Agent-LLM-Feeder)) so `:3001/v1`
+answers, then run the Ringer engine daemon:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r engine/requirements.txt
+export RINGER_DB_DSN=postgresql://…            # a Postgres Ringer owns (Feeder can host it)
+.venv/bin/uvicorn engine.app:app --host 127.0.0.1 --port 8700
+curl -s localhost:8700/engine/health           # {ok:true, db_ready:true, ...}
+```
+
+The daemon serves the Ringside wall **and** the agent-API on one port. (For just the CLI —
+`./ringer.py run manifest.json` — you don't need the daemon or the DB; see [Quickstart](#quickstart).)
+
+## Connect an agent to the swarm
+
+An agent files a job, Ringer runs it (verified, spend-capped), and wakes the agent when it's done.
+All JSON over `http://localhost:8700`:
+
+```bash
+H='Content-Type: application/json'
+
+# 1. (once) register where Ringer should wake you on completion
+curl -X PUT localhost:8700/agent-ledger/myagent -H "$H" \
+     -d '{"notify_url":"http://127.0.0.1:9000/ringer-done"}'
+
+# 2. file a swarm job. agent_code=who runs it (ringer); notify_agent=who to wake (you);
+#    body=a Ringer manifest as a JSON string (see “Manifest fields” below). Returns {"id":42,…}
+curl -X POST localhost:8700/agent-tasks -H "$H" \
+     -d '{"agent_code":"ringer","notify_agent":"myagent","title":"summarise these docs","body":"{\"run_name\":\"docs\",\"tasks\":[]}"}'
+
+# 3. nudge the runner to claim now (else it claims on its next poll)
+curl -X POST localhost:8700/engine/wake -H "$H" -d '{"task_id":42}'
+```
+
+Then either **get woken** — on any terminal state (`done` / `review` / `failed` / `needs_input`) Ringer
+`POST`s your `notify_url` with `{task_id, run_id, status, receipt_type, receipt_body}` — or **poll**
+`GET /agent-tasks/42` → `{task, receipts}` (the receipts are the live audit thread). The durable
+queue is the source of truth; the poll is always a safe backstop if a wake is missed.
+
+**Full agent-API:** `POST /agent-tasks` (file) · `POST /agent-tasks/claim-next` · `GET /agent-tasks?…`
+· `GET /agent-tasks/:id` · `POST /agent-tasks/:id/claim` · `PATCH /agent-tasks/:id` (transition +
+answer a `needs_input` task) · `POST /agent-tasks/:id/receipts` · `GET /agent-ledger` ·
+`PUT /agent-ledger/:code` · `POST /engine/wake`. The **kanban** on the Ringside wall (`:8700`) is the
+same queue with a human in the loop (answer/re-queue/priority/file).
+
+**Guaranteed bounds** (so an unattended agent can't run away): every worker call is capped by an
+OpenCode **step limit**, a per-run **token budget** (Feeder-enforced, fail-loud), and Feeder's
+**no-progress breaker** — and the human **consequence gate** means a run can self-verify correctness
+but never self-authorize a publish/deploy/delete/spend. See [CLAUDE.md](CLAUDE.md) for the operator detail.
+
 ## Quickstart
 
 Ringer runs on macOS and Linux (Windows via WSL) and needs Python 3.11+.
