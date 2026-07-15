@@ -106,6 +106,24 @@ def _find_child_run(state_dir: Path, since_ts: float) -> dict[str, Any]:
         return {}
 
 
+#: Feeder's terminal pre-route rejections — STOP the run, never retry (same broken
+#: model/task just re-spins). Handled identically: FAILED receipt + red wall.
+TERMINAL_429_CODES = ("run_budget_exceeded", "no_progress_loop")
+
+
+def _scan_terminal_429(run: dict[str, Any]) -> str | None:
+    """Find a terminal Feeder rejection code in the child run's worker output."""
+    for task in run.get("tasks") or []:
+        if not isinstance(task, dict):
+            continue
+        blob = " ".join(str(task.get(k) or "") for k in
+                        ("log_tail_full", "log_tail", "check_output_tail"))
+        for code in TERMINAL_429_CODES:
+            if code in blob:
+                return code
+    return None
+
+
 def _summarize(run: dict[str, Any], rc: int) -> str:
     return json.dumps({
         "child_run_id": run.get("run_id"),
@@ -167,17 +185,22 @@ def run_once(store: Store, *, agent_code: str = "ringer", identity: str = "ringe
     run = _find_child_run(DEFAULT_STATE_DIR, started)
     summary = _summarize(run, rc)
 
-    # FAIL LOUD on a spend-cap breach (Adam's directive): if Feeder shows the run
-    # hit its ceiling, that's terminal — mark it failed with the budget details so
-    # it shows RED on the wall, regardless of the child rc. (Over-budget worker
-    # calls were rejected pre-route, so zero provider tokens were burned on them.)
+    # FAIL LOUD on a terminal Feeder rejection (Adam's directive). Two kinds, both
+    # terminal → mark failed with the code so it shows RED on the wall, never retry
+    # (the same broken model/task just re-spins). Over-budget / spin calls were
+    # rejected pre-route, so zero provider tokens were burned on them.
+    #   • run_budget_exceeded — detected via the budget endpoint (authoritative)
+    #   • no_progress_loop     — detected by scanning the child run's worker output
     bstat = budget_status(task_id)
-    if bstat and bstat.get("budget") is not None and (bstat.get("spent") or 0) >= bstat["budget"]:
-        breach = json.dumps({"code": "run_budget_exceeded", "run_id": task_id,
-                             "spent": bstat.get("spent"), "budget": bstat.get("budget"),
-                             "child": json.loads(summary)}, sort_keys=True)
+    breached = bool(bstat and bstat.get("budget") is not None and (bstat.get("spent") or 0) >= bstat["budget"])
+    term_code = "run_budget_exceeded" if breached else _scan_terminal_429(run)
+    if term_code:
+        payload = {"code": term_code, "run_id": task_id, "child": json.loads(summary)}
+        if breached:
+            payload["spent"] = bstat.get("spent")
+            payload["budget"] = bstat.get("budget")
         store.transition(task_id, status="failed", agent_code=agent_code,
-                         receipt_type="FAILED", receipt_body=breach)
+                         receipt_type="FAILED", receipt_body=json.dumps(payload, sort_keys=True))
         return store.get_task(task_id)["task"]
 
     if rc == 0:

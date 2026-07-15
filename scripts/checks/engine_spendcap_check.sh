@@ -65,6 +65,24 @@ try:
                          dashboard=False, budget_tokens=None, timeout=180)
     check(fc and fc["status"] == "done", f"(c) no-breach must -> done, got {fc and fc['status']!r}")
 
+    # (d) no_progress_loop: the OTHER terminal 429, detected by scanning worker output.
+    check(runner._scan_terminal_429({"tasks": [{"log_tail": 'err {"code":"no_progress_loop"}'}]}) == "no_progress_loop",
+          "(d) scanner must detect no_progress_loop in worker output")
+    check(runner._scan_terminal_429({"tasks": [{"log_tail": "all good"}]}) is None,
+          "(d) scanner must not false-positive on clean output")
+    orig_find = runner._find_child_run
+    runner._find_child_run = lambda sd, ts: {"run_id": "x", "tasks": [{"log_tail": 'HTTP 429 {"error":{"code":"no_progress_loop","streak":15}}'}]}
+    try:
+        d = store.file_task(agent_code="ringer", title="spin", body=body)
+        fd = runner.run_once(store, agent_code="ringer", identity="spendcap-check",
+                             dashboard=False, budget_tokens=None, timeout=180)
+        check(fd and fd["status"] == "failed", f"(d) no_progress_loop must -> failed, got {fd and fd['status']!r}")
+        fr = [r for r in store.get_task(d["id"])["receipts"] if r["receipt_type"] == "FAILED"]
+        check(fr and json.loads(fr[-1]["body"]).get("code") == "no_progress_loop",
+              "(d) FAILED receipt must carry code=no_progress_loop")
+    finally:
+        runner._find_child_run = orig_find
+
 finally:
     runner.budget_status = orig_status
     try:

@@ -60,6 +60,20 @@ node .claude/coordination/coord.js msg "@wsl ..." # post (you appear as @ringer-
   substitute (OpenCode clobbers X-Session-Id with its own). `OPENCODE_CONFIG` env var IS honored
   (full config replacement); a project `opencode.json` in `--dir` also loads. `options.apiKey`
   flows as the Bearer token. Rerun the probe manifest after any OpenCode upgrade (no-drift check).
+- **⚠️ OpenCode STEP CAP guardrail (load-bearing, added 2026-07-15 after a 6M-token blowup).** Root
+  cause: OpenCode has NO default iteration bound, so a free/small model that returns empty completions
+  spins the agent loop (one task did **252 rounds**, 251 zero-output, resending context until the 900s
+  timeout — ~6M tokens). Fix lives in the **off-repo** `~/.config/opencode/opencode.json`:
+  `agent.<name>.steps = 40` on EVERY agent (build + researcher) — *"max agentic iterations before
+  forcing a text-only response"* (schema `https://opencode.ai/config.json`; verify-proven: steps=2 →
+  exactly 2 rounds then "Maximum Steps Reached"). Plus `compaction.prune = true`. Because it's
+  off-repo, `scripts/checks/engine_stepcap_check.sh` is the **regression guard** — run it if runs look
+  expensive. This is the BRACES; feeder's zero-progress circuit-breaker (terminal `429
+  no_progress_loop` after ~15 no-progress rounds) is the BELT. Ringer's runner treats both terminal
+  429s (`run_budget_exceeded`, `no_progress_loop`) as fail-loud (FAILED receipt, red wall, no retry).
+  `inject_run_id.py` copies the global config, so the baked per-run config inherits the cap too.
+  Timeout stays a coarse backstop (`DEFAULT_TIMEOUT_S=900`); the step cap is the real bound. Model
+  gating: a spun task grades 0.0 via `quality_feed.py`, down-weighting that model in Feeder routing.
 - **Eval backend stays `jsonl`** (`~/.ringer/runs.jsonl`) — NO Supabase. (Egress discipline: the OB
   Supabase org just blew its free egress cap; never point eval at OB's PostgREST. If cross-machine
   aggregation is ever truly needed: direct libpq on a SEPARATE db, per OB-Claude.)
