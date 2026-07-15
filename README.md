@@ -52,35 +52,53 @@ The daemon serves the Ringside wall **and** the agent-API on one port. (For just
 
 ## Connect an agent to the swarm
 
-An agent files a job, Ringer runs it (verified, spend-capped), and wakes the agent when it's done.
-All JSON over `http://localhost:8700`:
+There are **two ways in**, over `http://localhost:8700` (all JSON). Most agents want the first.
+
+### Lane A — ask in plain text (recommended)
+
+You don't write manifests. You post a plain-text **brief** — a question or goal — and **Ringer's
+orchestrator** does the reasoning: it reads your brief, asks clarifying questions if needed, writes the
+specs + checks, runs the verified swarm, and hands back the answer. This is how the fleet's own agents
+(e.g. Lunk) use it — *the thinking is Ringer's job, not yours.*
 
 ```bash
 H='Content-Type: application/json'
 
-# 1. (once) register where Ringer should wake you on completion
+# 1. (once) register where Ringer should wake you with the answer
 curl -X PUT localhost:8700/agent-ledger/myagent -H "$H" \
      -d '{"notify_url":"http://127.0.0.1:9000/ringer-done"}'
 
-# 2. file a swarm job. agent_code=who runs it (ringer); notify_agent=who to wake (you);
-#    body=a Ringer manifest as a JSON string (see “Manifest fields” below). Returns {"id":42,…}
+# 2. post a plain-text brief (task_kind:"brief" — the headless runner leaves it for the orchestrator)
 curl -X POST localhost:8700/agent-tasks -H "$H" \
-     -d '{"agent_code":"ringer","notify_agent":"myagent","title":"summarise these docs","body":"{\"run_name\":\"docs\",\"tasks\":[]}"}'
-
-# 3. nudge the runner to claim now (else it claims on its next poll)
-curl -X POST localhost:8700/engine/wake -H "$H" -d '{"task_id":42}'
+     -d '{"agent_code":"ringer","task_kind":"brief","notify_agent":"myagent","title":"which DB should we pick?","body":"Plain-English question + any context. No manifest."}'
 ```
 
-Then either **get woken** — on any terminal state (`done` / `review` / `failed` / `needs_input`) Ringer
-`POST`s your `notify_url` with `{task_id, run_id, status, receipt_type, receipt_body}` — or **poll**
-`GET /agent-tasks/42` → `{task, receipts}` (the receipts are the live audit thread). The durable
-queue is the source of truth; the poll is always a safe backstop if a wake is missed.
+Then watch the task's **receipt thread** (`GET /agent-tasks/:id` → `{task, receipts}`): the orchestrator
+may flip it to `needs_input` with a clarifying question — you answer via
+`PATCH /agent-tasks/:id {status:"todo", receipt_type:"UNBLOCKED", receipt_body:"<your answer>"}` — and
+when it's finished it posts the answer and wakes your `notify_url` with
+`{task_id, run_id, status, receipt_type, receipt_body}`. (Polling the thread is always a safe backstop.)
+
+### Lane B — bring your own manifest (advanced)
+
+If you already have a [Ringer manifest](#manifest-fields), file it as a runnable task and the **headless
+auto-runner** claims + runs + verifies it directly (no orchestrator in the loop):
+
+```bash
+curl -X POST localhost:8700/agent-tasks -H "$H" \
+     -d '{"agent_code":"ringer","notify_agent":"myagent","title":"docs sweep","body":"{\"run_name\":\"docs\",\"tasks\":[ … ]}"}'
+curl -X POST localhost:8700/engine/wake -H "$H" -d '{"task_id":42}'   # claim now vs on poll
+```
+
+Default `task_kind` is `task` (a runnable manifest). A plain-text body filed as a `task` will bounce to
+`needs_input` — that's what `task_kind:"brief"` (Lane A) is for.
 
 **Full agent-API:** `POST /agent-tasks` (file) · `POST /agent-tasks/claim-next` · `GET /agent-tasks?…`
 · `GET /agent-tasks/:id` · `POST /agent-tasks/:id/claim` · `PATCH /agent-tasks/:id` (transition +
 answer a `needs_input` task) · `POST /agent-tasks/:id/receipts` · `GET /agent-ledger` ·
 `PUT /agent-ledger/:code` · `POST /engine/wake`. The **kanban** on the Ringside wall (`:8700`) is the
-same queue with a human in the loop (answer/re-queue/priority/file).
+same queue with a human in the loop (answer/re-queue/priority/file) — and where the orchestrator picks
+up briefs.
 
 **Guaranteed bounds** (so an unattended agent can't run away): every worker call is capped by an
 OpenCode **step limit**, a per-run **token budget** (Feeder-enforced, fail-loud), and Feeder's

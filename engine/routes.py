@@ -138,8 +138,9 @@ def patch_task(task_id: int, body: PatchIn):
             set_fields[f] = getattr(body, f)
     if "reassign_to" in provided and body.reassign_to is not None:
         set_fields["agent_code"] = body.reassign_to
+    st = store()
     try:
-        return store().transition(
+        task = st.transition(
             task_id, status=body.status, agent_code=body.agent_code,
             receipt_type=body.receipt_type, receipt_body=body.receipt_body,
             set_fields=set_fields or None,
@@ -151,6 +152,14 @@ def patch_task(task_id: int, body: PatchIn):
     except ValueError as e:
         code = 404 if "no such task" in str(e) else 400
         raise HTTPException(status_code=code, detail=str(e))
+    # Fire the outbound wake on a terminal transition made HERE (orchestrator posts
+    # the answer + marks the brief done; kanban re-queue/answer). The runner fires
+    # its own via _finish(); these two sources are disjoint, so no double-wake.
+    from . import runner
+    if task and task.get("notify_agent") and task.get("status") in runner._NOTIFY_STATES:
+        receipts = st.get_task(task_id).get("receipts") or []
+        runner._notify_requester(task, receipts, st)
+    return task
 
 
 # ---- 7. standalone receipt ----

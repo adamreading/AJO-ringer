@@ -63,6 +63,15 @@ try:
     check(runner.run_once(store, agent_code="ringer", dashboard=False) is None,
           "run_once must return None when the queue is drained")
 
+    # 2b. Plain-text BRIEF (Lunk's lane) must be IGNORED by the headless runner —
+    # it's for the orchestrator brain, not the engine. run_once leaves it untouched.
+    brief = store.file_task(agent_code="ringer", title="a plain question?",
+                            body="just some plain text, not a manifest", task_kind="brief")
+    check(runner.run_once(store, agent_code="ringer", dashboard=False) is None,
+          "runner must NOT claim a plain-text brief (task_kind=brief)")
+    check(store.get_task(brief["id"])["task"]["status"] == "todo",
+          "brief must stay 'todo' for the orchestrator to pick up (not needs_input/failed)")
+
     # 3. Bad body: not a manifest -> needs_input + BLOCKED (graceful, not a crash).
     b = store.file_task(agent_code="ringer", title="junk", body="this is not json")
     fb = runner.run_once(store, agent_code="ringer", dashboard=False)

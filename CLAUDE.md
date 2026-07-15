@@ -16,6 +16,18 @@ auto-loads in this repo and is your orchestrator playbook — obey it: *you revi
 You plan + review + write specs/checks; cheap Feeder-served workers do the typing; the executed check
 (exit 0) is the only truth. This is the whole point — the Feeder seam is IN v1, not a later add-on.
 
+### INVARIANT — Ringer-Claude IS the orchestrator brain (Adam, hard reset 2026-07-15)
+A plain-text client (e.g. Lunk) posts a **brief** — a question/goal in PLAIN TEXT — to the queue; **YOU
+(Ringer-Claude) pick it up, clarify with them via the task's receipt thread, author the manifest, run the
+orchestration, and return the answer.** The client NEVER writes manifests, and the headless auto-runner
+NEVER consumes a brief. Two lanes on the queue: **`task_kind='brief'`** = plain-text ask for the
+orchestrator brain (the runner IGNORES it — `claim_next` only claims `task_kind='task'`; you pick briefs
+up from the kanban); **`task_kind='task'`** = a runnable manifest the auto-runner claims + verifies. The
+outbound wake (`notify_agent` → `notify_url`) fires on any terminal transition (runner via `_finish`, or
+you via PATCH) — it returns the ANSWER to the client, not a manifest. Root-cause of the 2026-07-15 burn:
+we verified mechanics but not the interaction model against Adam's stated intent — **verify the intent,
+not just the wiring.**
+
 ## Coordination board — how you talk to the fleet
 The board is a shared file both WSL and Windows see (no server). From this repo, always via Bash:
 ```bash

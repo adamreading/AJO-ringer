@@ -131,7 +131,13 @@ class Store:
                                      agent_code=agent_code, body=body)
 
     def claim_next(self, agent_code: str, *, lease_seconds: float = 900,
-                   max_attempts: int = 3) -> dict[str, Any] | None:
+                   max_attempts: int = 3,
+                   claimable_kinds: tuple[str, ...] = ("task",)) -> dict[str, Any] | None:
+        """Claim the best-eligible todo. claimable_kinds gates WHICH task_kinds the
+        caller will take — the headless auto-runner passes ('task',) so it only ever
+        claims runnable MANIFEST tasks and never a plain-text 'brief' (those are for
+        the orchestrator brain to pick up via the kanban). Lease reclaim is
+        unconditional (a stuck task of any kind must still auto-recover)."""
         tasks = self._t("agent_tasks")
         with self._conn() as conn, conn.cursor() as cur:
             # (A) reclaim expired leases FIRST — race-safe, in this same transaction.
@@ -157,13 +163,14 @@ class Store:
             for row in cur.fetchall():
                 self._add_receipt(cur, row["id"], receipt_type="LEASE_EXPIRED", agent_code="engine",
                                   body="lease expired, returned to queue")
-            # (B) claim the single best-eligible todo, race-safe.
+            # (B) claim the single best-eligible todo of a claimable KIND, race-safe.
             cur.execute(
                 f"""SELECT id FROM {tasks}
                     WHERE status='todo' AND (agent_code=%s OR agent_code='all')
+                          AND task_kind = ANY(%s)
                     ORDER BY priority DESC, created_at ASC
                     FOR UPDATE SKIP LOCKED LIMIT 1""",
-                (agent_code,),
+                (agent_code, list(claimable_kinds)),
             )
             pick = cur.fetchone()
             if not pick:

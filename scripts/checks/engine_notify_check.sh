@@ -13,7 +13,7 @@ test -x "$PY" || { echo "FAIL: venv python not found"; exit 1; }
 cd /home/ajo/ringer
 
 "$PY" - <<'PY'
-import json, os, sys, threading
+import json, os, sys, threading, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import psycopg
@@ -49,7 +49,7 @@ try:
     t = store.file_task(agent_code="ringer", title="notify", body=body, notify_agent="lunk")
     runner.run_once(store, agent_code="ringer", identity="notify-check",
                     dashboard=False, budget_tokens=None, timeout=180)
-    import time; time.sleep(0.3)  # let the POST land
+    time.sleep(0.3)  # let the POST land
     mine = [r for r in received if r.get("task_id") == t["id"]]
     check(len(mine) == 1, f"(a) expected 1 wake POST for task {t['id']}, got {len(mine)}")
     if mine:
@@ -71,6 +71,23 @@ try:
     f3 = runner.run_once(store, agent_code="ringer", identity="notify-check",
                          dashboard=False, budget_tokens=None, timeout=180)
     check(f3 and f3["status"] == "done", f"(c) dead notify_url must not fail the task, got {f3 and f3['status']!r}")
+
+    # (d) PATCH-path wake: the ORCHESTRATOR posts the answer via the API on a BRIEF
+    # (never touched by the runner) → the terminal transition must fire the wake too.
+    os.environ["RINGER_DB_SCHEMA"] = SCHEMA
+    from fastapi.testclient import TestClient
+    from engine.app import app as _app
+    received.clear()
+    tb = store.file_task(agent_code="ringer", title="a plain brief", body="a plain question",
+                         task_kind="brief", notify_agent="lunk")
+    with TestClient(_app) as client:
+        r = client.patch(f"/agent-tasks/{tb['id']}", json={
+            "agent_code": "ringer-claude", "status": "done",
+            "receipt_type": "DONE", "receipt_body": "here is the orchestrated answer"})
+        check(r.status_code == 200, f"(d) PATCH brief->done must 200, got {r.status_code}")
+    time.sleep(0.3)
+    hit = [x for x in received if x.get("task_id") == tb["id"] and x.get("status") == "done"]
+    check(len(hit) == 1, f"(d) orchestrator PATCH->terminal must fire ONE wake, got {len(hit)}")
 
 finally:
     srv.shutdown()

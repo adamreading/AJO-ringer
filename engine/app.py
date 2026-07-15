@@ -25,7 +25,7 @@ from .routes import router as agent_api_router
 from .routes import store as _make_store
 
 APP_NAME = "ringer-engine"
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.6.0"
 
 # DB readiness is decided at startup and surfaced on /engine/health.
 DB_READY = False
