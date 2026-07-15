@@ -177,6 +177,26 @@ class Store:
                               body=None)
             return task
 
+    def claim_task(self, task_id: int, agent_code: str, *,
+                   lease_seconds: float = 900) -> dict[str, Any] | None:
+        """Atomic claim of ONE task by id (kanban 'assign to me'). Returns the
+        working row, or None if it was not 'todo' (someone else won → 409)."""
+        tasks = self._t("agent_tasks")
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""UPDATE {tasks} SET status='working', claimed_by=%s, claimed_at=now(),
+                        lease_expires_at = now() + make_interval(secs => %s),
+                        attempts = attempts + 1, updated_at=now(), status_updated_at=now()
+                    WHERE id=%s AND status='todo' RETURNING *""",
+                (agent_code, float(lease_seconds), task_id),
+            )
+            task = cur.fetchone()
+            if not task:
+                return None
+            self._add_receipt(cur, task["id"], receipt_type="CLAIMED",
+                              agent_code=agent_code, body=None)
+            return task
+
     def get_task(self, task_id: int) -> dict[str, Any]:
         with self._conn() as conn, conn.cursor() as cur:
             cur.execute(f"SELECT * FROM {self._t('agent_tasks')} WHERE id=%s", (task_id,))
@@ -188,25 +208,37 @@ class Store:
             receipts = cur.fetchall()
         return {"task": task, "receipts": receipts}
 
-    def transition(self, task_id: int, *, status: str, agent_code: str,
+    #: columns a PATCH may free-set (reassign_to maps onto agent_code)
+    _SETTABLE = ("title", "body", "priority", "agent_code")
+
+    def transition(self, task_id: int, *, status: str | None = None, agent_code: str,
                    receipt_type: str | None = None, receipt_body: str | None = None,
                    blocked_reason: Any = _UNSET, hold_reason: Any = _UNSET,
+                   set_fields: dict[str, Any] | None = None,
                    human_authorized: bool = False, consequential: bool = False) -> dict[str, Any]:
-        if status not in VALID_STATUS:
+        """The PATCH workhorse. status is optional (None = free-set fields / add a
+        receipt without a lifecycle change). ->todo/->done clear the claim."""
+        if status is not None and status not in VALID_STATUS:
             raise ValueError(f"invalid status: {status!r}")
         # CODE-ENFORCED GATE: an autonomous caller cannot self-authorize a consequential
         # step. Only a human-directed caller passes human_authorized=True.
         if consequential and not human_authorized:
             raise PermissionError("consequential transition requires human_authorized=True")
 
-        sets = ["status=%s", "status_updated_at=now()", "updated_at=now()"]
-        params: list[Any] = [status]
-        if status in ("todo", "done"):
-            sets += ["claimed_by=NULL", "claimed_at=NULL", "lease_expires_at=NULL"]
+        sets = ["updated_at=now()"]
+        params: list[Any] = []
+        if status is not None:
+            sets += ["status=%s", "status_updated_at=now()"]
+            params.append(status)
+            if status in ("todo", "done"):
+                sets += ["claimed_by=NULL", "claimed_at=NULL", "lease_expires_at=NULL"]
         if blocked_reason is not _UNSET:
             sets.append("blocked_reason=%s"); params.append(blocked_reason)
         if hold_reason is not _UNSET:
             sets.append("hold_reason=%s"); params.append(hold_reason)
+        for col in self._SETTABLE:
+            if set_fields and col in set_fields:
+                sets.append(f"{col}=%s"); params.append(set_fields[col])
         params.append(task_id)
         with self._conn() as conn, conn.cursor() as cur:
             cur.execute(
@@ -234,6 +266,17 @@ class Store:
             cur.execute(
                 f"SELECT * FROM {self._t('agent_tasks')} {clause} "
                 f"ORDER BY priority DESC, created_at ASC LIMIT %s",
+                params,
+            )
+            return cur.fetchall()
+
+    def list_ledger(self, *, agent_code: str | None = None) -> list[dict[str, Any]]:
+        where, params = "", []
+        if agent_code is not None:
+            where = "WHERE agent_code=%s"; params.append(agent_code)
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT * FROM {self._t('agent_status_ledger')} {where} ORDER BY agent_code ASC",
                 params,
             )
             return cur.fetchall()

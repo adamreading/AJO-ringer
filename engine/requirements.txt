@@ -1,0 +1,15 @@
+# Ringer Engine (FastAPI daemon) runtime + test deps.
+# The venv (/home/ajo/ringer/.venv) is gitignored; rebuild it with:
+#   python3 -m venv .venv && .venv/bin/pip install -r engine/requirements.txt
+# Standalone `ringer.py run` stays stdlib-only — only this daemon needs these.
+
+# --- runtime ---
+fastapi==0.139.0
+uvicorn==0.51.0
+psycopg[binary]==3.3.4   # Postgres queue store (engine/store.py)
+
+# --- test harness (engine_api_check.sh drives the app via fastapi.testclient) ---
+# starlette 1.3.x's TestClient uses httpx2; httpx is pulled in transitively but
+# pinned here so the check's transport is reproducible.
+httpx2==2.7.0
+httpx==0.28.1

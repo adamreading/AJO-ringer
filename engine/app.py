@@ -11,10 +11,15 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from .routes import router as agent_api_router
+
 APP_NAME = "ringer-engine"
-APP_VERSION = "0.0.1"
+APP_VERSION = "0.1.0"
 
 app = FastAPI(title="Ringer Engine", version=APP_VERSION)
+
+# The agent-API: file / claim / get / patch / receipts / ledger + local wake (P2).
+app.include_router(agent_api_router)
 
 
 @app.get("/engine/health")
