@@ -251,9 +251,16 @@ Ringside is a local web page — no install, no account, nothing leaves your mac
 ./ringer.py hud                 # or open it any time → http://127.0.0.1:8700
 ```
 
+> **On this machine the `:8700` daemon is the Ringer Engine — a Python + FastAPI service** (`engine/`,
+> run via `.venv/bin/uvicorn engine.app:app --port 8700`), which serves this same wall **plus** a
+> persistent swarm work-queue + agent-API (see [CLAUDE.md](CLAUDE.md) → Scope). Standalone
+> `ringer.py run` stays stdlib-only; only the daemon needs the venv. The health probe is unchanged
+> (`GET :8700/api/runs`).
+
 This fork ships a rebuilt **v2 UI** (`dashboard/ringside-v2.html`, served on :8700):
 
 - **Agent video-wall** — runs group into *jobs* (rounds accumulate under one job); expand any worker and its main pane is the **live conversation between that agent and the orchestrator** — the brief it was handed, then its text / tool-call / step turns, and on a retry the orchestrator's "sent it back" reply. The raw log is one click away. Each worker shows the **real model that actually served it** (from Feeder), not the routed alias.
+- **Queue page** — a kanban over the swarm work-queue (agent-API): tasks bucket by status (todo/working/needs_input/review/done/failed); open a task for its receipt thread and light human steering (answer a blocked task, re-queue, mark done, priority, file a job).
 - **Models page** — a best-model-per-class finder over Feeder's real catalog: pick a class and see the models ranked by score, with cost tier, speed/intelligence rank, context, and health. A ◉ marks scores that include Ringer's own graded runs (the quality loop).
 - **Analytics page** — your swarm's actual usage, keyed on the real served model × real class: first-try pass rate, volume, and where Ringer's executed-check grades have moved a model's Feeder score.
 

@@ -258,6 +258,36 @@ codex frontier lane first). Items, headline first:
    (the stale-server/stale-tab incident, 15:00). (Feeder-side catalog
   follow-ups are feeder-claude's lane: MiniMax 402-on-free-tier, github 413 size limits.)
 
+### POST-V1 JOB 2 — Ringer Engine (swarm queue + agent-API + kanban) — IN BUILD 2026-07-15
+Adam greenlit building the Ringer Engine: a persistent swarm **work-queue + agent-API + kanban** on
+the always-on `:8700` daemon. Stack decision (Adam): the daemon becomes a **Python + FastAPI service**
+(`engine/`, venv), storage = the `ringer` database on Feeder's local Postgres; **Feeder stays Node,
+unchanged** (porting it = ~18k LOC / zero gain, all four agents agreed). Standalone `ringer.py run`
+stays stdlib-only. Design seed: OB-Claude's donated blueprint (`docs/open-engine-blueprint.md`).
+Phased, one reviewable increment each with an executed check (`scripts/checks/engine_*`):
+- **P0 ✅** venv + FastAPI skeleton + `ringer` DB provisioned + DSN secured (`engine.env`, chmod 600).
+- **P1 ✅** `engine/store.py` — PG queue: race-safe `claim_next` (FOR UPDATE SKIP LOCKED), lease +
+  attempt-cap auto-recovery, **code-enforced human gate** (consequential ⇒ human_authorized), receipts,
+  ledger. (`engine_store_check.sh`.)
+- **P2 ✅** `engine/routes.py` — agent-API: file/claim-next/get/claim-by-id/patch/receipts/ledger +
+  `/engine/wake`; gate surfaces as HTTP 403. (`engine_api_check.sh`, `69ab004`.)
+- **P3 ✅** `engine/hud.py` — the Ringside wall re-homed onto FastAPI (same `ringer.py` helpers, one
+  service on :8700); startup self-provisions the schema; wsl swapped recover-stack to venv uvicorn,
+  green both sides. (`engine_hud_check.sh` + Playwright, `b810771`.)
+- **P4-core ✅** `engine/runner.py` — claim → `ringer.py run` → DONE/review/failed receipt; bad body →
+  needs_input. Verified zero-cost via the mock engine. (`engine_runner_check.sh`, `051218d`.)
+- **P4b ⏳ (gated on feeder)** per-run spend-cap: `X-Run-Id` (= `agent_tasks.id`) baked per-invocation
+  via `OPENCODE_CONFIG` ({env:} doesn't substitute in headers — probe-proven), Feeder `POST
+  /api/swarm/budget {run_id, max_tokens}` (opt-in, lower-only), typed terminal `429
+  run_budget_exceeded`. Adam's directive: default cap **HIGH (~500k, free resource)** and **FAIL LOUD**
+  (stop + FAILED receipt + red on the wall). Contract locked with feeder; awaiting their enforcer
+  deploy + a joint wire-probe. **The always-on auto-runner stays OFF until the cap is proven** — no
+  uncapped burn path.
+- **P5 ✅** swarm-queue kanban on the wall (Queue page) over the agent-API; functional substrate +
+  data-* hooks (Claude Design restyles). Docs updated (CLAUDE.md/README: :8700 is a FastAPI service).
+Delegation product (Lunk files → Ringer orchestrates → relays) is **parked pending Adam's explicit
+go**; the agent-API/wake interface is handed to wsl for planning only.
+
 ### Bootstrap & coordination — how Ringer-Claude is born + joins the board (verified pattern)
 Ringer gets its OWN dedicated Claude ("Ringer-Claude") = a Claude Code session with cwd=`~/ringer`,
 same WSL `ajo` user, distinguished by working dir + `COORD_AGENT`. Proven by feeder-claude, which is

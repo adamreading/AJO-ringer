@@ -134,6 +134,19 @@ still gated behind Adam for anything consequential. (Relevant now that workers r
   lint + `scripts/wire_class.py` + `scripts/swarm_capacity.py`), post-run ritual step 0 =
   `scripts/feeder_enrich.py`, review + grade per the skill rubric, feed via
   `scripts/quality_feed.py --post`. Post-v1 backlog lives in `RINGER-PLAN.md`.
+- **Ringer Engine (in build, 2026-07-15) — the `:8700` daemon is now a Python + FastAPI service.**
+  A persistent swarm **work-queue + agent-API + kanban**, storage = the `ringer` database on Feeder's
+  local Postgres (venv at `.venv`: fastapi/uvicorn/psycopg; deps in `engine/requirements.txt`).
+  Standalone `ringer.py run` stays **stdlib-only**; only the daemon needs the venv. Launch is now
+  `.venv/bin/uvicorn engine.app:app --host 127.0.0.1 --port 8700` (needs `RINGER_DB_DSN` from
+  `~/.config/ringer/engine.env`); health probe unchanged (`GET :8700/api/runs`). Package `engine/`:
+  `store.py` (PG queue: race-safe claim, lease+attempt-cap, code-enforced human gate), `routes.py`
+  (agent-API: file/claim/get/patch/receipts/ledger + `/engine/wake`), `hud.py` (the Ringside wall,
+  re-homed — same `ringer.py` helpers, one source of truth), `runner.py` (claim → `ringer.py run` →
+  DONE receipt). Each phase has an executed check in `scripts/checks/engine_*`. **Still open:** the
+  per-run spend-cap (`X-Run-Id` baked via `OPENCODE_CONFIG` + Feeder `POST /api/swarm/budget`, default
+  ~500k tokens, **fail-loud**) — gated on feeder's enforcer deploy; the always-on auto-runner stays
+  OFF until that cap is proven, so no uncapped burn path opens. Design seed: `docs/open-engine-blueprint.md`.
 - **Open Engine executor** (Ringer running verifiable code-cards behind the human gate) = explicitly a
   LATER phase, NOT v1.
 - License: Ringer is **PolyForm Shield 1.0.0** — usable/modifiable, cannot be resold as a competing product.
