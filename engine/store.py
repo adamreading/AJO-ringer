@@ -75,6 +75,9 @@ class Store:
                     updated_at        timestamptz NOT NULL DEFAULT now(),
                     status_updated_at timestamptz NOT NULL DEFAULT now()
                 )""")
+            # Self-migrate: who to wake on a terminal state (the outbound wake-in,
+            # blueprint §7). Nullable; null = no wake (receipts + poll are the backstop).
+            cur.execute(f'ALTER TABLE {tasks} ADD COLUMN IF NOT EXISTS notify_agent text')
             cur.execute(f'CREATE INDEX IF NOT EXISTS idx_tasks_code_status ON {tasks}(agent_code, status)')
             cur.execute(f'CREATE INDEX IF NOT EXISTS idx_tasks_claim ON {tasks}(status, priority DESC, created_at ASC)')
             cur.execute(f"""
@@ -100,13 +103,13 @@ class Store:
     # ---- tasks ----
     def file_task(self, *, agent_code: str, title: str, body: str | None = None,
                   priority: int = 0, parent_id: int | None = None,
-                  task_kind: str = "task") -> dict[str, Any]:
+                  task_kind: str = "task", notify_agent: str | None = None) -> dict[str, Any]:
         with self._conn() as conn, conn.cursor() as cur:
             cur.execute(
                 f"""INSERT INTO {self._t('agent_tasks')}
-                    (agent_code, title, body, priority, parent_id, task_kind, status)
-                    VALUES (%s,%s,%s,%s,%s,%s,'todo') RETURNING *""",
-                (agent_code, title, body, priority, parent_id, task_kind),
+                    (agent_code, title, body, priority, parent_id, task_kind, notify_agent, status)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'todo') RETURNING *""",
+                (agent_code, title, body, priority, parent_id, task_kind, notify_agent),
             )
             return cur.fetchone()
 

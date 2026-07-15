@@ -139,6 +139,45 @@ def _scan_terminal_429(run: dict[str, Any]) -> str | None:
     return None
 
 
+#: task states that warrant waking the requester (terminal, or needs their input)
+_NOTIFY_STATES = ("done", "review", "failed", "needs_input")
+
+
+def _notify_requester(task: dict[str, Any], receipts: list[dict[str, Any]], store: Store) -> None:
+    """Outbound wake-in (blueprint §7): POST the task's notify_agent's registered
+    notify_url when the task reaches a state worth waking them for. FAIL-OPEN — a
+    missed wake never affects the task; the durable queue + polling are the backstop."""
+    notify_agent = task.get("notify_agent")
+    status = task.get("status")
+    if not notify_agent or status not in _NOTIFY_STATES:
+        return
+    rows = store.list_ledger(agent_code=notify_agent)
+    url = rows[0].get("notify_url") if rows else None
+    if not url:
+        return
+    last = receipts[-1] if receipts else {}
+    body = json.dumps({
+        "task_id": task["id"], "run_id": str(task["id"]), "status": status,
+        "notify_agent": notify_agent,
+        "receipt_type": last.get("receipt_type"), "receipt_body": last.get("body"),
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(url, data=body, method="POST",
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5):
+            pass
+    except Exception:  # noqa: BLE001 - fail-open by design
+        pass
+
+
+def _finish(store: Store, task_id: int) -> dict[str, Any]:
+    """Read the finished task + receipts once, fire the outbound wake, return the task."""
+    full = store.get_task(task_id)
+    task = full.get("task") or {}
+    _notify_requester(task, full.get("receipts") or [], store)
+    return task
+
+
 def _summarize(run: dict[str, Any], rc: int) -> str:
     return json.dumps({
         "child_run_id": run.get("run_id"),
@@ -168,7 +207,7 @@ def run_once(store: Store, *, agent_code: str = "ringer", identity: str = "ringe
         # Can't run it — ask for a valid manifest instead of failing outright.
         store.transition(task_id, status="needs_input", agent_code=agent_code,
                          blocked_reason=err, receipt_type="BLOCKED", receipt_body=err)
-        return store.get_task(task_id)["task"]
+        return _finish(store, task_id)
 
     # Declare the run budget ONCE, before workers fire (spend-cap backstop).
     if budget_tokens:
@@ -188,11 +227,11 @@ def run_once(store: Store, *, agent_code: str = "ringer", identity: str = "ringe
     except subprocess.TimeoutExpired:
         store.transition(task_id, status="failed", agent_code=agent_code,
                          receipt_type="FAILED", receipt_body=f"ringer.py run timed out after {timeout}s")
-        return store.get_task(task_id)["task"]
+        return _finish(store, task_id)
     except Exception as exc:  # noqa: BLE001 - any spawn failure -> FAILED, never hang the task
         store.transition(task_id, status="failed", agent_code=agent_code,
                          receipt_type="FAILED", receipt_body=f"ringer.py run failed to execute: {exc!r}")
-        return store.get_task(task_id)["task"]
+        return _finish(store, task_id)
     finally:
         with contextlib.suppress(OSError):
             manifest_path.unlink()
@@ -216,7 +255,7 @@ def run_once(store: Store, *, agent_code: str = "ringer", identity: str = "ringe
             payload["budget"] = bstat.get("budget")
         store.transition(task_id, status="failed", agent_code=agent_code,
                          receipt_type="FAILED", receipt_body=json.dumps(payload, sort_keys=True))
-        return store.get_task(task_id)["task"]
+        return _finish(store, task_id)
 
     if rc == 0:
         store.transition(task_id, status="done", agent_code=agent_code,
@@ -228,7 +267,7 @@ def run_once(store: Store, *, agent_code: str = "ringer", identity: str = "ringe
     else:
         store.transition(task_id, status="failed", agent_code=agent_code,
                          receipt_type="FAILED", receipt_body=summary + f" | stderr_tail={proc.stderr[-400:]!r}")
-    return store.get_task(task_id)["task"]
+    return _finish(store, task_id)
 
 
 def serve(store: Store, *, agent_code: str = "ringer", poll_interval: float = 120.0,

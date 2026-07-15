@@ -36,6 +36,7 @@ class FileTaskIn(BaseModel):
     priority: int = 0
     parent_id: int | None = None
     task_kind: str = "task"
+    notify_agent: str | None = None  # who to wake on terminal (their ledger notify_url)
 
 
 class ClaimNextIn(BaseModel):
@@ -101,7 +102,7 @@ def claim_next(body: ClaimNextIn):
 def file_task(body: FileTaskIn):
     return store().file_task(agent_code=body.agent_code, title=body.title, body=body.body,
                              priority=body.priority, parent_id=body.parent_id,
-                             task_kind=body.task_kind)
+                             task_kind=body.task_kind, notify_agent=body.notify_agent)
 
 
 # ---- 3. thread read ----
