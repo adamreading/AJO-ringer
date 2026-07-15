@@ -1767,3 +1767,49 @@ button {
 .health-healthy { color: var(--pass); }
 .health-degraded { color: var(--working); }
 .health-down, .health-unhealthy { color: var(--fail); }
+
+/* ── Swarm Queue (kanban) ─────────────────────────────────────────────────
+   Rough functional substrate — Claude Design owns final styling. Data hooks:
+   [data-kanban] [data-column] [data-column-body] .queue-card[data-task-id]
+   [data-queue-modal] [data-queue-actions] .queue-receipt[data-receipt-type]. */
+.queue-toolbar { display:flex; align-items:center; gap:12px; padding:12px 16px; }
+.queue-toolbar .queue-meta { color:var(--muted); font-size:.76rem; }
+.kanban { display:flex; gap:12px; padding:0 16px 16px; overflow-x:auto; align-items:flex-start; }
+.queue-col { flex:0 0 220px; background:var(--glass-bg); border:1px solid var(--glass-border);
+  border-radius:var(--radius-sm); display:flex; flex-direction:column; max-height:calc(100vh - 200px); }
+.queue-col-head { display:flex; justify-content:space-between; align-items:center; padding:8px 10px;
+  font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted);
+  border-bottom:1px solid var(--glass-border); }
+.queue-col-count { color:var(--ink); }
+.queue-col-body { padding:8px; display:flex; flex-direction:column; gap:8px; overflow-y:auto; }
+.queue-empty { color:var(--muted); font-size:.72rem; text-align:center; padding:6px; }
+.queue-card { background:var(--surface-glass); border:1px solid var(--glass-border);
+  border-radius:var(--radius-sm); padding:8px 10px; cursor:pointer; }
+.queue-card:hover { border-color:var(--accent); }
+.queue-card[data-status="working"] { border-left:3px solid var(--working); }
+.queue-card[data-status="needs_input"] { border-left:3px solid var(--accent); }
+.queue-card[data-status="done"] { border-left:3px solid var(--pass); }
+.queue-card[data-status="failed"] { border-left:3px solid var(--fail); }
+.queue-card-title { font-size:.82rem; color:var(--ink); margin-bottom:4px; }
+.queue-card-meta { display:flex; flex-wrap:wrap; gap:6px; font-size:.68rem; color:var(--muted); }
+.queue-card-blocked { margin-top:6px; font-size:.7rem; color:var(--accent); }
+/* modal */
+.queue-modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.55);
+  display:flex; align-items:center; justify-content:center; z-index:50; }
+.queue-modal-backdrop[hidden] { display:none; }
+.queue-modal-card { width:min(640px,92vw); max-height:86vh; overflow-y:auto;
+  background:var(--ground); border:1px solid var(--glass-border); border-radius:var(--radius-sm); padding:16px; }
+.queue-modal-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+.queue-modal-sub { color:var(--muted); font-size:.74rem; margin:4px 0 10px; }
+.queue-body { margin:8px 0; } .queue-body pre, .queue-receipt-body { white-space:pre-wrap; word-break:break-word;
+  background:var(--surface-glass); border:1px solid var(--glass-border); border-radius:var(--radius-sm);
+  padding:8px; font-size:.72rem; color:var(--ink); overflow-x:auto; }
+.queue-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0; }
+.queue-actions textarea, .queue-label textarea, .queue-label input { width:100%; background:var(--surface-glass);
+  border:1px solid var(--glass-border); border-radius:var(--radius-sm); color:var(--ink); padding:8px; font-size:.78rem; }
+.queue-label { display:block; font-size:.74rem; color:var(--muted); margin:8px 0; }
+.queue-thread-head { font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-top:12px; }
+.queue-thread { list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.queue-receipt-type { font-size:.7rem; color:var(--accent); font-weight:600; }
+.queue-receipt-agent { font-size:.7rem; color:var(--muted); }
+.queue-file-error { color:var(--fail); font-size:.74rem; margin-top:8px; }

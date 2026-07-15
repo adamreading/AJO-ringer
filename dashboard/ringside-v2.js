@@ -22,6 +22,7 @@
     canon: [],            // feeder's real model catalog (/api/canon)
     usage: [],            // Ringer's served-model x class outcomes (/api/usage)
     modelsClass: 'coding',// selected class on the Models best-per-class finder
+    queue: { tasks: [], selected: null, mode: null }, // swarm work-queue kanban (/agent-tasks)
     apiBase: '',
     kirbyActive: false,
     kirbyShiftStart: 0,
@@ -274,6 +275,214 @@
 
 
   function apiUrl(path) { return state.apiBase + path; }
+
+  // ── Swarm Queue (kanban over the agent-API) ────────────────────────────────
+  // Rough functional substrate: real data + data-* hooks; Claude Design restyles.
+  var QUEUE_COLUMNS = [
+    { key: 'standing', label: 'Standing' },
+    { key: 'todo', label: 'To do' },
+    { key: 'working', label: 'Working' },
+    { key: 'needs_input', label: 'Needs input' },
+    { key: 'review', label: 'Review' },
+    { key: 'done', label: 'Done' },
+    { key: 'failed', label: 'Failed' },
+  ];
+
+  function qesc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function qapi(method, path, body) {
+    return fetch(apiUrl(path), {
+      method: method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, json: j }; }); });
+  }
+
+  function fetchQueue() {
+    fetch(apiUrl('/agent-tasks?limit=300'), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (tasks) {
+        state.queue.tasks = Array.isArray(tasks) ? tasks : [];
+        renderQueue();
+      })
+      .catch(function () { /* leave last-known board up */ });
+  }
+
+  function renderQueue() {
+    var board = document.getElementById('kanban-board');
+    if (!board) return;
+    var tasks = state.queue.tasks || [];
+    var byStatus = {};
+    QUEUE_COLUMNS.forEach(function (c) { byStatus[c.key] = []; });
+    tasks.forEach(function (t) { (byStatus[t.status] || (byStatus[t.status] = [])).push(t); });
+
+    var html = QUEUE_COLUMNS.map(function (col) {
+      var items = byStatus[col.key] || [];
+      var cards = items.map(function (t) {
+        return '<div class="queue-card" data-task-id="' + t.id + '" data-status="' + qesc(t.status) + '" role="button" tabindex="0">' +
+          '<div class="queue-card-title">' + qesc(t.title || ('task #' + t.id)) + '</div>' +
+          '<div class="queue-card-meta">' +
+            '<span data-field="id">#' + t.id + '</span>' +
+            '<span data-field="agent">' + qesc(t.agent_code) + '</span>' +
+            (t.priority ? '<span data-field="priority">p' + qesc(t.priority) + '</span>' : '') +
+            (t.attempts ? '<span data-field="attempts">try ' + qesc(t.attempts) + '</span>' : '') +
+            (t.claimed_by ? '<span data-field="claimed">@' + qesc(t.claimed_by) + '</span>' : '') +
+          '</div>' +
+          (t.blocked_reason ? '<div class="queue-card-blocked" data-field="blocked">' + qesc(t.blocked_reason) + '</div>' : '') +
+        '</div>';
+      }).join('');
+      return '<div class="queue-col" data-column="' + col.key + '">' +
+        '<div class="queue-col-head"><span>' + col.label + '</span><span class="queue-col-count" data-count>' + items.length + '</span></div>' +
+        '<div class="queue-col-body" data-column-body>' + (cards || '<div class="queue-empty">&mdash;</div>') + '</div>' +
+      '</div>';
+    }).join('');
+    board.innerHTML = html;
+
+    var meta = document.querySelector('[data-queue-meta]');
+    if (meta) meta.textContent = tasks.length + ' task' + (tasks.length === 1 ? '' : 's');
+
+    board.querySelectorAll('.queue-card').forEach(function (card) {
+      var open = function () { openTask(Number(card.dataset.taskId)); };
+      card.addEventListener('click', open);
+      card.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    });
+  }
+
+  function openTask(id) {
+    state.queue.selected = id;
+    state.queue.mode = 'view';
+    fetch(apiUrl('/agent-tasks/' + id), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) { if (data && data.task) renderTaskModal(data.task, data.receipts || []); });
+  }
+
+  function openFileForm() {
+    state.queue.selected = null;
+    state.queue.mode = 'file';
+    renderFileModal();
+  }
+
+  function closeModal() {
+    state.queue.selected = null;
+    state.queue.mode = null;
+    var m = document.getElementById('queue-modal');
+    if (m) m.setAttribute('hidden', '');
+  }
+
+  function showModal(inner) {
+    var m = document.getElementById('queue-modal');
+    var card = m && m.querySelector('[data-queue-modal-card]');
+    if (!m || !card) return;
+    card.innerHTML = inner;
+    m.removeAttribute('hidden');
+    card.querySelectorAll('[data-close]').forEach(function (b) { b.addEventListener('click', closeModal); });
+  }
+
+  function renderTaskModal(task, receipts) {
+    var thread = receipts.map(function (r) {
+      return '<li class="queue-receipt" data-receipt-type="' + qesc(r.receipt_type) + '">' +
+        '<span class="queue-receipt-type">' + qesc(r.receipt_type) + '</span> ' +
+        '<span class="queue-receipt-agent">' + qesc(r.agent_code) + '</span>' +
+        (r.body ? '<pre class="queue-receipt-body">' + qesc(r.body) + '</pre>' : '') +
+      '</li>';
+    }).join('') || '<li class="queue-empty">no receipts yet</li>';
+
+    var controls = '<div class="queue-actions" data-queue-actions>';
+    if (task.status === 'needs_input') {
+      controls += '<textarea data-answer placeholder="Answer this task’s question…" rows="3"></textarea>' +
+                  '<button class="control-button" data-act="answer">Answer &amp; re-queue</button>';
+    }
+    if (task.status !== 'done' && task.status !== 'todo' && task.status !== 'standing') {
+      controls += '<button class="control-button" data-act="requeue">Re-queue</button>';
+    }
+    if (task.status !== 'done') {
+      controls += '<button class="control-button" data-act="done">Mark done</button>';
+    }
+    controls += '<button class="control-button" data-act="prio-up">Priority +</button>';
+    controls += '<button class="text-button" data-close>Close</button>';
+    controls += '</div>';
+
+    showModal(
+      '<div class="queue-modal-head"><div class="panel-title">#' + task.id + ' ' + qesc(task.title || '') + '</div>' +
+        '<button class="text-button" data-close aria-label="Close">✕</button></div>' +
+      '<div class="queue-modal-sub" data-field="status">' + qesc(task.status) +
+        (task.claimed_by ? ' · @' + qesc(task.claimed_by) : '') +
+        ' · ' + qesc(task.agent_code) + ' · p' + qesc(task.priority || 0) + '</div>' +
+      (task.body ? '<details class="queue-body"><summary>manifest / body</summary><pre>' + qesc(task.body) + '</pre></details>' : '') +
+      controls +
+      '<div class="queue-thread-head">Receipts</div><ul class="queue-thread">' + thread + '</ul>'
+    );
+
+    var card = document.querySelector('[data-queue-modal-card]');
+    if (!card) return;
+    var act = function (name, fn) { var b = card.querySelector('[data-act="' + name + '"]'); if (b) b.addEventListener('click', fn); };
+    act('answer', function () {
+      var ta = card.querySelector('[data-answer]');
+      var text = ta ? ta.value.trim() : '';
+      if (!text) { if (ta) ta.focus(); return; }
+      qapi('PATCH', '/agent-tasks/' + task.id, { agent_code: 'adam', status: 'todo',
+        blocked_reason: null, receipt_type: 'UNBLOCKED', receipt_body: text })
+        .then(afterAction);
+    });
+    act('requeue', function () {
+      qapi('PATCH', '/agent-tasks/' + task.id, { agent_code: 'adam', status: 'todo',
+        receipt_type: 'RESUMED', receipt_body: 'manually re-queued from the board' }).then(afterAction);
+    });
+    act('done', function () {
+      qapi('PATCH', '/agent-tasks/' + task.id, { agent_code: 'adam', status: 'done',
+        receipt_type: 'DONE', receipt_body: 'manually marked done from the board' }).then(afterAction);
+    });
+    act('prio-up', function () {
+      qapi('PATCH', '/agent-tasks/' + task.id, { agent_code: 'adam', priority: (task.priority || 0) + 1 }).then(afterAction);
+    });
+  }
+
+  function renderFileModal() {
+    showModal(
+      '<div class="queue-modal-head"><div class="panel-title">File a swarm job</div>' +
+        '<button class="text-button" data-close aria-label="Close">✕</button></div>' +
+      '<label class="queue-label">Title<input data-file-title placeholder="short job name"></label>' +
+      '<label class="queue-label">Body (ringer manifest JSON, or intent)<textarea data-file-body rows="10" ' +
+        'placeholder=\'{"run_name":"...","tasks":[...]}\'></textarea></label>' +
+      '<div class="queue-actions"><button class="control-button" data-file-submit>File job</button>' +
+        '<button class="text-button" data-close>Cancel</button></div>' +
+      '<div class="queue-file-error" data-file-error hidden></div>'
+    );
+    var card = document.querySelector('[data-queue-modal-card]');
+    if (!card) return;
+    var submit = card.querySelector('[data-file-submit]');
+    if (submit) submit.addEventListener('click', function () {
+      var title = (card.querySelector('[data-file-title]') || {}).value || '';
+      var body = (card.querySelector('[data-file-body]') || {}).value || '';
+      var err = card.querySelector('[data-file-error]');
+      if (!title.trim()) { if (err) { err.textContent = 'Title is required.'; err.removeAttribute('hidden'); } return; }
+      qapi('POST', '/agent-tasks', { agent_code: 'ringer', title: title.trim(), body: body }).then(function (res) {
+        if (res.ok) { afterAction(res); }
+        else if (err) { err.textContent = 'File failed: ' + (res.json && res.json.detail || res.status); err.removeAttribute('hidden'); }
+      });
+    });
+  }
+
+  function afterAction(res) {
+    if (res && res.ok === false) return; // leave modal open on error
+    closeModal();
+    fetchQueue();
+  }
+
+  function setupQueue() {
+    var fileBtn = document.querySelector('[data-action="file-task"]');
+    if (fileBtn) fileBtn.addEventListener('click', openFileForm);
+    var backdrop = document.getElementById('queue-modal');
+    if (backdrop) backdrop.addEventListener('click', function (e) { if (e.target === backdrop) closeModal(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && backdrop && !backdrop.hasAttribute('hidden')) closeModal();
+    });
+  }
 
   /** Fetch log for each expanded, still-running worker. */
   function fetchExpandedWorkerLogs() {
@@ -1657,6 +1866,7 @@
         setTimeout(buildAnalytics, 50); // fresh canvas contexts after show/hide
       }
     }
+    if (page === 'queue') fetchQueue();
 
     render();
   }
@@ -1859,6 +2069,10 @@
     setInterval(tickClock, 1000);
     setInterval(fetchRuns, 1000);
     setInterval(fetchLibrary, 2000);
+    // Poll the queue only while the Queue page is showing (keeps the board live
+    // without a modal open, which would otherwise be clobbered mid-edit).
+    setInterval(function () { if (state.currentPage === 'queue' && state.queue.mode === null) fetchQueue(); }, 2500);
+    setupQueue();
     if (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) {
       window.__TAURI__.core.invoke('hud_endpoint').then(function (endpoint) { state.apiBase = endpoint; fetchRuns(); fetchLibrary(); }).catch(function () { fetchRuns(); fetchLibrary(); });
     } else { fetchRuns(); fetchLibrary(); }

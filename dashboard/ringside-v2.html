@@ -27,6 +27,9 @@
       <button class="nav-icon" data-page="models" title="Models" aria-label="Models">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
+      <button class="nav-icon" data-page="queue" title="Queue" aria-label="Swarm queue">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="7" rx="1"/></svg>
+      </button>
       <button class="nav-icon" data-page="settings" title="Theme designer" aria-label="Theme designer">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 0 18h1.4a1.8 1.8 0 0 0 1.6-2.6 1.8 1.8 0 0 1 1.6-2.6H18a3 3 0 0 0 3-3A9 9 0 0 0 12 3Z"/><circle cx="7.5" cy="12" r=".8"/><circle cx="10" cy="7.5" r=".8"/><circle cx="15.5" cy="8" r=".8"/></svg>
       </button>
@@ -187,6 +190,22 @@
             <p style="color:var(--muted);">See Analytics page for full model data.</p>
           </div>
         </div>
+      </div>
+
+      <!-- Queue Page (swarm work-queue kanban; data-* hooks for Claude Design) -->
+      <div class="page-panel" data-page="queue" hidden>
+        <div class="queue-toolbar" data-queue-toolbar>
+          <div class="panel-title">Swarm Queue</div>
+          <button class="control-button" type="button" data-action="file-task">+ File job</button>
+          <span class="queue-meta" data-queue-meta>&mdash;</span>
+        </div>
+        <div class="kanban" id="kanban-board" data-kanban>
+          <p style="color:var(--muted);padding:16px;">Loading queue&hellip;</p>
+        </div>
+      </div>
+      <!-- Task detail modal (receipt thread + light human steering) -->
+      <div class="queue-modal-backdrop" id="queue-modal" data-queue-modal hidden>
+        <div class="queue-modal-card" role="dialog" aria-modal="true" data-queue-modal-card></div>
       </div>
 
       <div class="page-panel" data-page="settings" hidden>
