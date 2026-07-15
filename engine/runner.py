@@ -27,6 +27,8 @@ import os
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,42 @@ from .store import Store
 
 RINGER_PY = str(Path(__file__).resolve().parent.parent / "ringer.py")
 DEFAULT_STATE_DIR = Path.home() / ".ringer"
+
+# Spend-cap (feeder lane). run_id = agent_tasks.id, carried to Feeder as the baked
+# X-Run-Id header (opencode-feeder.sh). Declared ONCE at claim; Feeder's in-mem
+# counter is live truth after that. Default HIGH + fail-loud (Adam's directive):
+# the cap is a runaway BACKSTOP, not rationing, and a breach must never be silent.
+FEEDER_BASE = os.environ.get("RINGER_FEEDER_BASE", "http://localhost:3001")
+DEFAULT_BUDGET_TOKENS = int(os.environ.get("RINGER_RUN_BUDGET_TOKENS", "500000"))
+
+
+def _feeder_json(method: str, path: str, body: dict | None = None) -> Any:
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(
+        FEEDER_BASE + path, data=data, method=method,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        raw = resp.read()
+    return json.loads(raw) if raw else None
+
+
+def declare_budget(task_id: int, max_tokens: int) -> dict | None:
+    """Declare the per-run token ceiling BEFORE workers fire. Fail-OPEN: an infra
+    hiccup here leaves the run uncapped (matches Feeder) rather than blocking it."""
+    try:
+        return _feeder_json("POST", "/api/swarm/budget",
+                            {"run_id": str(task_id), "max_tokens": int(max_tokens)})
+    except Exception:  # noqa: BLE001 - fail-open by design
+        return None
+
+
+def budget_status(task_id: int) -> dict | None:
+    """Live {budget, spent} for the run, or None if undeclared/unreachable (404)."""
+    try:
+        return _feeder_json("GET", f"/api/swarm/budget?run_id={task_id}")
+    except Exception:  # noqa: BLE001 - 404 (undeclared) or unreachable -> no breach
+        return None
 
 
 def _materialize_manifest(body: str | None) -> tuple[Path | None, str | None]:
@@ -83,6 +121,7 @@ def _summarize(run: dict[str, Any], rc: int) -> str:
 def run_once(store: Store, *, agent_code: str = "ringer", identity: str = "ringer-engine",
              python_exe: str = "python3", dashboard: bool = True,
              lease_seconds: float = 3600, max_attempts: int = 3,
+             budget_tokens: int | None = DEFAULT_BUDGET_TOKENS,
              timeout: float | None = None) -> dict[str, Any] | None:
     """Claim and execute ONE task. Returns the final task row, or None if idle."""
     store.upsert_ledger(agent_code, last_queue_result="polling")
@@ -98,12 +137,16 @@ def run_once(store: Store, *, agent_code: str = "ringer", identity: str = "ringe
                          blocked_reason=err, receipt_type="BLOCKED", receipt_body=err)
         return store.get_task(task_id)["task"]
 
+    # Declare the run budget ONCE, before workers fire (spend-cap backstop).
+    if budget_tokens:
+        declare_budget(task_id, budget_tokens)
+
     cmd = [python_exe, RINGER_PY, "run", str(manifest_path), "--identity", identity]
     if not dashboard:
         cmd.append("--no-dashboard")
 
     env = dict(os.environ)
-    env["RINGER_RUN_ID"] = str(task_id)  # ready for the P4b spend-cap header
+    env["RINGER_RUN_ID"] = str(task_id)  # baked as X-Run-Id by opencode-feeder.sh
 
     started = time.time()
     try:
@@ -123,6 +166,20 @@ def run_once(store: Store, *, agent_code: str = "ringer", identity: str = "ringe
 
     run = _find_child_run(DEFAULT_STATE_DIR, started)
     summary = _summarize(run, rc)
+
+    # FAIL LOUD on a spend-cap breach (Adam's directive): if Feeder shows the run
+    # hit its ceiling, that's terminal — mark it failed with the budget details so
+    # it shows RED on the wall, regardless of the child rc. (Over-budget worker
+    # calls were rejected pre-route, so zero provider tokens were burned on them.)
+    bstat = budget_status(task_id)
+    if bstat and bstat.get("budget") is not None and (bstat.get("spent") or 0) >= bstat["budget"]:
+        breach = json.dumps({"code": "run_budget_exceeded", "run_id": task_id,
+                             "spent": bstat.get("spent"), "budget": bstat.get("budget"),
+                             "child": json.loads(summary)}, sort_keys=True)
+        store.transition(task_id, status="failed", agent_code=agent_code,
+                         receipt_type="FAILED", receipt_body=breach)
+        return store.get_task(task_id)["task"]
+
     if rc == 0:
         store.transition(task_id, status="done", agent_code=agent_code,
                          receipt_type="DONE", receipt_body=summary)
