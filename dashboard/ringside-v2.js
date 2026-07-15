@@ -855,7 +855,7 @@
     // not the routed slug (feeder/auto/*).
     var sm = servedModel(task);
     if (sm) {
-      detail.appendChild(el('div', { className: 'worker-model', text: 'Model: ' + sm }));
+      detail.appendChild(el('div', { className: 'worker-model', text: 'Model: ' + sm, attrs: { 'data-key': 'model-' + compositeKey } }));
     }
 
     // LIVE CONVERSATION — the agent's readable transcript with the orchestrator
@@ -871,7 +871,7 @@
     // Raw log — escape hatch, collapsed. Seeded from the embedded tail so it is never
     // blank (worker.log files live in /tmp and can be reaped; the run JSON keeps a tail).
     var seed = stripAnsi(task.log_tail_full || task.log_tail || '');
-    var logDetails = el('details', { className: 'worker-rawlog' });
+    var logDetails = el('details', { className: 'worker-rawlog', attrs: { 'data-key': 'rawlog-' + compositeKey } });
     logDetails.appendChild(el('summary', { text: 'Raw log' }));
     logDetails.appendChild(el('pre', {
       className: 'worker-log',
@@ -887,6 +887,7 @@
       detail.appendChild(el('div', {
         className: 'worker-verdict ' + kind,
         text: typeof verdict === 'string' ? verdict : JSON.stringify(verdict),
+        attrs: { 'data-key': 'verdict-' + compositeKey },
       }));
     }
 
