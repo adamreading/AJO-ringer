@@ -1,0 +1,19 @@
+{
+  "run_name": "probe-xrunid-feeder",
+  "workdir": "/tmp/ringer-probe-xrunid",
+  "max_parallel": 1,
+  "tasks": [
+    {
+      "key": "xrunid-probe",
+      "task_type": "probe",
+      "wire_class": "coding",
+      "engine": "opencode",
+      "model": "feeder/auto/coding",
+      "spec": "You are a minimal wire-capture probe worker for the Ringer Engine spend-cap. Boundary: write only inside your current task directory; touch nothing else. Goal: create a file named marker.txt containing exactly one line: xrunid probe ok. That is the entire task — one real (free-tier) model call so Feeder logs this worker request; the fleet then verifies the baked X-Run-Id header landed on the request row. Do not add anything else.",
+      "check": "grep -qx 'xrunid probe ok' marker.txt && echo 'marker.txt correct' || { echo 'FAIL: marker.txt missing or wrong'; exit 1; }",
+      "expect_files": ["marker.txt"],
+      "timeout_s": 180,
+      "verified": "marker.txt exists and is exactly the one expected line; the point is the accompanying real feeder request carrying the baked X-Run-Id header"
+    }
+  ]
+}
