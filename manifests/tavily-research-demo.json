@@ -1,0 +1,20 @@
+{
+  "run_name": "tavily-research-demo",
+  "workdir": "/tmp/ringer-tavily-demo",
+  "max_parallel": 1,
+  "tasks": [
+    {
+      "key": "opencode-latest",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": ["--agent", "researcher"],
+      "timeout_s": 360,
+      "spec": "You are a research worker with LIVE web access through a Tavily web-search tool. Your training data is stale and will give a wrong version number, so you MUST use the web-search tool for this task rather than answering from memory.\n\nTask: Find the CURRENT latest released version of the OpenCode CLI (the open-source coding agent published at https://github.com/sst/opencode) as of today, and summarise what is new in recent releases. Search the web, open the release notes / changelog, and cross-check the version number across at least two independent sources (for example the GitHub releases page and one other).\n\nWrite your findings to a file named report.md in your current working directory, with exactly these three sections:\n\n## Answer\nThe latest version number and its release date, in one or two sentences.\n\n## What's new\n2-4 bullet points of notable changes in recent releases.\n\n## Sources\nA bulleted list of the full https:// source URLs you actually opened (at least two).\n\nCreate only report.md. Do not create or modify any other files, and do not commit anything.",
+      "check": "sh /home/ajo/ringer/scripts/checks/tavily_research_check.sh",
+      "verified": "report.md has Answer + Sources sections with >=2 cited URLs AND worker.log contains a real Tavily tool_use event (proves live web search, executed)",
+      "expect_files": ["report.md"]
+    }
+  ]
+}

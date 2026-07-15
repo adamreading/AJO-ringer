@@ -340,3 +340,16 @@ checks and raw logs support — no vibes, no worker self-reports.
   frontier lane (none installed yet — orchestrator integrated the reviewed
   helper by hand this time), or pre-chunk the edit into a tiny target file
   the worker owns.
+
+## feeder/auto/reasoning + researcher agent (Tavily web search — served model varies)
+
+- 2026-07-15 — tavily-research-demo (research, WSL box). Web-search seam PROVEN
+  end-to-end. One research task run with `--agent researcher` (Tavily MCP,
+  X-Augment off): 1/1 first-try PASS, one opencode session, 9 feeder requests
+  (the tool loop round-trips), 5 real `tavily_tavily_search` tool_use events in
+  worker.log. Feeder saw the `tools` array and routed reasoning to a tool-capable
+  model (nvidia/nemotron-3-super-120b-a12b). The answer (OpenCode v1.17.20,
+  released 2026-07-13) is post-training-cutoff and correct against the installed
+  binary — i.e. it genuinely came from the web, not priors. Takeaway: for
+  research, pair `feeder/auto/reasoning` with `--agent researcher`; the check
+  must assert a Tavily tool_use in the raw log (URLs alone can be hallucinated).

@@ -207,6 +207,18 @@ Route with per-task `"engine": "opencode"` and `"model": "feeder/auto/<class>"` 
 
 > **Containment note:** `opencode-feeder.sh` is a state-isolation wrapper, not an OS sandbox (the upstream `opencode-sandboxed.sh` Seatbelt profile is macOS-only). On Linux/WSL, worker containment comes from run-level `"worktrees": true` (an isolated git worktree per task) plus the human consequence-gate — keep manifests scoped and never let a worker's retry loop cross publish/deploy/delete/spend without you.
 
+### Web search — per-agent, orchestrator-decided
+
+Code workers stay ungrounded on purpose (a deterministic, check-verified task must not be silently steered by whatever a search returned). But **research** is worthless on stale model priors, so web access is granted **per agent**, not globally.
+
+The mechanism is an OpenCode agent with a web-search tool, not a second provider — Feeder stays a pure model proxy. `~/.config/opencode/opencode.json` defines:
+
+- a **[Tavily](https://tavily.com) MCP** server (a `tavily-mcp` local process; put a free `TAVILY_API_KEY` in its `environment` block and `chmod 600` the file);
+- a **`researcher` agent** that has the Tavily tools enabled and is told to search rather than answer from memory;
+- the default **`build` agent** with those tools turned **off** (`"tavily*": false`) — so ordinary code tasks have no web tool at all.
+
+A task opts into research by carrying `"engine_args": ["--agent", "researcher"]` and a research-shaped class (`"model": "feeder/auto/reasoning"`). The orchestrator owns that choice per task — it's auditable in the manifest, no `ringer.py` change. The tool calls run **client-side in OpenCode**; Feeder only serves the model (and, seeing a `tools` array, routes to a tool-capable model automatically). `manifests/tavily-research-demo.json` is a worked example — its check (`scripts/checks/tavily_research_check.sh`) passes only if the deliverable cites ≥2 sources **and** the raw `worker.log` contains a real Tavily `tool_use` event, so a hallucinated-URL "answer" fails the run.
+
 ### The plan lane: Grok Build CLI
 
 If you already pay for SuperGrok or X Premium Plus, Grok Build is a second flat-rate worker lane — no per-token bill:
