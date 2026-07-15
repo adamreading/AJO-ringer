@@ -349,7 +349,3 @@ Four rules are baked into every worker invocation. They all cost us real debuggi
 - Rust toolchain, only if you're building the parked Tauri app from source
 
 ![Between rounds](docs/between-rounds.png)
-
----
-
-Built by [Jon Edwards](https://limitededitionjonathan.com) and his agent fleet — a Claude orchestrator wrote the specs and reviewed the diffs, Codex swarms wrote the implementation, and this repo's own eval table caught its first three bugs. The tool is its own proof of concept.
