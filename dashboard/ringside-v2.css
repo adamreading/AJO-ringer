@@ -1627,6 +1627,27 @@ button {
   border-radius: 999px;
   padding: 1px 8px;
 }
+.job-toggle-all {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border: 1px solid var(--accent-glow);
+  border-radius: 999px;
+  padding: 1px 10px;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.12s, border-color 0.12s;
+}
+.job-toggle-all:hover,
+.job-toggle-all:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
 .job-group .run-panel { margin-bottom: 10px; }
 
 /* Served model line in the expanded worker detail */
@@ -1636,6 +1657,19 @@ button {
   color: var(--accent);
   margin: 2px 0 8px;
 }
+.worker-grade {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.worker-grade.pass    { color: var(--pass);    background: rgba(46, 232, 154, 0.12); }
+.worker-grade.working { color: var(--working); background: rgba(245, 183, 49, 0.12); }
+.worker-grade.fail    { color: var(--fail);    background: rgba(255, 79, 110, 0.12); }
 
 /* ── Live conversation (agent ↔ orchestrator transcript) ─────────────────── */
 .worker-convo {

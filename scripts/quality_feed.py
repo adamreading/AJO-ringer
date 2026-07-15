@@ -3,9 +3,19 @@
 
 import argparse
 import json
+import os
 import sys
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+
+
+def atomic_write_json(path, obj):
+    """Write obj to path atomically, matching ringer.py's state format
+    (indent=2, sort_keys, trailing newline) so it composes with feeder_enrich."""
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, 'w', encoding='utf-8') as f:
+        f.write(json.dumps(obj, indent=2, sort_keys=True) + "\n")
+    os.replace(tmp, path)
 
 
 def parse_grade(grade_str):
@@ -121,7 +131,27 @@ def main():
 
         samples.append(sample)
 
-    result = {"samples": samples, "skipped": skipped}
+    # Persist the orchestrator's EXPLICIT grades back into the run JSON so the wall
+    # can show the true 0..1 grade next to each agent's model. Only explicit --grade
+    # values are recorded (the orchestrator's judgment); the default-pass/fail
+    # heuristics are NOT persisted, so an ungraded task stays blank on the wall.
+    # Independent of the Feeder-sampling skip above (that only governs POSTing).
+    graded = []
+    if explicit_grades and not args.dry_run:
+        for task in tasks:
+            k = task.get('key', '')
+            if k in explicit_grades:
+                task['quality_score'] = explicit_grades[k]
+                task['grade_source'] = 'orchestrator'
+                task['graded_by'] = 'ringer'
+                graded.append(k)
+        if graded:
+            try:
+                atomic_write_json(args.state, state)
+            except OSError as e:
+                print(f"Warning: could not persist grades to state JSON: {e}", file=sys.stderr)
+
+    result = {"samples": samples, "skipped": skipped, "graded": graded}
 
     if args.post:
         base_url = args.feeder_base.rstrip('/')

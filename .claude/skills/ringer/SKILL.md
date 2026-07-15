@@ -354,6 +354,13 @@ Rules: grade the outcome, not the effort; mixed-model attempts are auto-skipped
 metric); backpressured attempts score nobody; grade only what the checks and raw
 logs support.
 
+Your explicit `--grade` scores are now also **persisted back into the run JSON**
+(`quality_score`/`grade_source` per task) and shown as a coloured grade pill next to
+each agent's model on the Ringside wall — so grading isn't just fed to the router, it
+tells the human how well each agent did. Only explicit grades appear (heuristic
+defaults are not persisted), so an ungraded task shows no pill: grade every task you
+want visible. (`--dry-run` previews without writing.)
+
 ## Baked-in invariants (preserve in any change to ringer.py)
 
 Stdin closed (`< /dev/null`); sandbox mode explicit; verification executes

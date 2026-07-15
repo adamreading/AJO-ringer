@@ -687,6 +687,37 @@
         text: job.runs.length + (job.runs.length === 1 ? ' round' : ' rounds'),
       }));
       if (job.isLive) header.appendChild(el('span', { className: 'job-live', text: 'LIVE' }));
+      // Expand / collapse EVERY agent window in this job at once (all rounds).
+      var jobKeys = [];
+      job.runs.forEach(function (run) {
+        (run.tasks || []).forEach(function (task, ti) {
+          jobKeys.push(run.id + '::' + taskKey(task, ti));
+        });
+      });
+      if (jobKeys.length) {
+        var anyCollapsed = jobKeys.some(function (k) { return !state.expandedWorkers.has(k); });
+        header.appendChild(el('span', {
+          className: 'job-toggle-all',
+          text: anyCollapsed ? 'Expand all' : 'Collapse all',
+          attrs: { role: 'button', tabindex: '0', 'data-key': 'jobtoggle-' + job.name },
+          onclick: function (e) {
+            if (e && e.stopPropagation) e.stopPropagation();
+            // Recompute live (not from the captured closure): morph can reuse this
+            // node and keep an older listener, so decide from current state at click.
+            var collapsedNow = jobKeys.some(function (k) { return !state.expandedWorkers.has(k); });
+            if (collapsedNow) {
+              jobKeys.forEach(function (k) { state.expandedWorkers.set(k, true); });
+              // one call each covers all newly-added keys (the pollers self-iterate the map)
+              fetchExpandedTranscripts();
+              fetchExpandedWorkerLogs();
+              fetchLiveModels();
+            } else {
+              jobKeys.forEach(function (k) { state.expandedWorkers.delete(k); });
+            }
+            render();
+          },
+        }));
+      }
       group.appendChild(header);
       // newest round on top, labelled Round N (N = chronological round number)
       job.runs.slice().reverse().forEach(function (run, idx) {
@@ -911,7 +942,19 @@
     // not the routed slug (feeder/auto/*).
     var sm = servedModel(task, compositeKey);
     if (sm) {
-      detail.appendChild(el('div', { className: 'worker-model', text: 'Model: ' + sm, attrs: { 'data-key': 'model-' + compositeKey } }));
+      var modelLine = el('div', { className: 'worker-model', attrs: { 'data-key': 'model-' + compositeKey } });
+      modelLine.appendChild(txt('Model: ' + sm));
+      // Orchestrator's grade (true 0..1, persisted by quality_feed.py). Blank until graded.
+      var grade = task.quality_score;
+      if (typeof grade === 'number' && !isNaN(grade)) {
+        var tier = grade >= 0.85 ? 'pass' : (grade >= 0.5 ? 'working' : 'fail');
+        modelLine.appendChild(el('span', {
+          className: 'worker-grade ' + tier,
+          text: 'Grade ' + grade.toFixed(2),
+          attrs: { title: 'Orchestrator grade (0–1)' + (task.graded_by ? ' — ' + task.graded_by : '') },
+        }));
+      }
+      detail.appendChild(modelLine);
     }
 
     // LIVE CONVERSATION — the agent's readable transcript with the orchestrator
