@@ -4379,8 +4379,39 @@ def scan_hud_run_states(state_dir: Path, *, limit: int = 12) -> list[dict[str, A
     for path in paths[:limit]:
         data = read_json_object(path, {})
         if data:
-            runs.append(data)
+            runs.append(_mark_if_orphaned(data))
     return runs
+
+
+def _mark_if_orphaned(data: dict[str, Any]) -> dict[str, Any]:
+    """A run left in 'live' whose orchestrator process is gone (e.g. ringer.py was
+    killed externally before it could finalize) would otherwise show LIVE forever.
+    Report it as 'died' so the HUD self-heals; the on-disk file is left untouched."""
+    if bool(data.get("finished")) or str(data.get("state", "live")) != "live":
+        return data
+    pid = data.get("pid")
+    try:
+        pid_int = int(pid)
+    except (TypeError, ValueError):
+        return data
+    if pid_is_alive(pid_int):
+        return data
+    marked = dict(data)
+    marked["state"] = "died"
+    marked["orphaned"] = True
+    # Tasks frozen mid-flight (their orchestrator is gone) would spin forever on the
+    # wall — report them as 'interrupted' (terminal), leaving finished ones untouched.
+    non_terminal = {"", "running", "working", "active", "retry", "retrying", "pending", "queued"}
+    tasks = marked.get("tasks")
+    if isinstance(tasks, list):
+        new_tasks = []
+        for task in tasks:
+            if isinstance(task, dict) and str(task.get("status", "")).lower() in non_terminal:
+                task = dict(task)
+                task["status"] = "interrupted"
+            new_tasks.append(task)
+        marked["tasks"] = new_tasks
+    return marked
 
 
 def read_active_runs_file() -> dict[str, Any]:
@@ -4642,7 +4673,9 @@ class PersistentHudServer:
                         self,
                         {
                             "runs": scan_hud_run_states(state_dir),
-                            "active": read_active_runs_file(),
+                            # read_active_runs() prunes entries whose orchestrator pid is
+                            # dead — so an externally-killed run stops showing LIVE.
+                            "active": read_active_runs(),
                         },
                     )
                     return

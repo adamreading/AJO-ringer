@@ -1207,11 +1207,14 @@ button {
   transform: translateY(-1px);
 }
 
-.worker-card.pass    { border-left: 3px solid var(--pass); }
-.worker-card.working { border-left: 3px solid var(--working); }
-.worker-card.fail    { border-left: 3px solid var(--fail); }
-.worker-card.retry   { border-left: 3px solid var(--working); }
-.worker-card.waiting { border-left: 3px solid var(--waiting); }
+.worker-card.pass        { border-left: 3px solid var(--pass); }
+.worker-card.working     { border-left: 3px solid var(--working); }
+.worker-card.fail        { border-left: 3px solid var(--fail); }
+.worker-card.retry       { border-left: 3px solid var(--working); }
+.worker-card.interrupted { border-left: 3px solid var(--waiting); }
+.worker-card.waiting     { border-left: 3px solid var(--waiting); }
+.worker-card.interrupted .worker-icon  { color: var(--waiting); }
+.worker-card.interrupted .worker-state { color: var(--waiting); background: rgba(107, 122, 153, 0.12); }
 
 [data-theme="light"] .worker-card {
   background: #ffffff;

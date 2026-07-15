@@ -140,12 +140,13 @@
     if (s === 'working' || s === 'running' || s === 'active') return 'working';
     if (s === 'retry' || s === 'retrying') return 'retry';
     if (s === 'fail' || s === 'failed' || s === 'error') return 'fail';
+    if (s === 'interrupted' || s === 'died' || s === 'aborted') return 'interrupted';
     return 'waiting';
   }
 
   /** Human label for task kind. */
   function taskStateText(kind) {
-    const map = { pass: 'Passed', working: 'Working', retry: 'Retrying', fail: 'Failed', waiting: 'Waiting' };
+    const map = { pass: 'Passed', working: 'Working', retry: 'Retrying', fail: 'Failed', interrupted: 'Interrupted', waiting: 'Waiting' };
     return map[kind] || 'Waiting';
   }
 
