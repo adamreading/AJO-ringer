@@ -97,8 +97,9 @@ Each task gets its own directory, its own worker, its own log, and its own verdi
 | `check` | Shell command run after the worker exits; exit 0 = PASS |
 | `expect_files` | Files that must exist and be non-empty before the check runs |
 | `engine` | Which configured engine runs this task (default `codex`) |
-| `model` | Which model a harness engine runs for this task — fills the engine's `{model}` placeholder (e.g. `"openrouter/moonshotai/kimi-k2.7"`); empty uses the engine's `model_default` |
+| `model` | Which model a harness engine runs for this task — fills the engine's `{model}` placeholder; empty uses the engine's `model_default`. On the **Feeder lane** this is a *class*, `"feeder/auto/<class>"` (Feeder picks the actual model); on a direct engine it's a model id, `"openrouter/moonshotai/kimi-k2.7"`. |
 | `task_type` | Optional free-form string naming the kind of work this task is, so the model-performance log can slice pass rates by task shape rather than only by model. Suggested vocabulary: `code-feature`, `code-fix`, `code-review`, `test-hardening`, `docs`, `research`, `persona-review`, `copywriting`, `site-build`, `motion-design`, `image-gen`, `data-pipeline`, `format-conversion`, `probe`, `bakeoff`. Empty is allowed; the log just reports it under `(none)`. |
+| `wire_class` | (Feeder lane) the task-class Feeder scores and routes on, and that quality grades feed back to — one of `coding, reasoning, math, creative_writing, instruction_following, long_query, multi_turn` (bare `feeder/auto` → `overall`). `scripts/wire_class.py` validates it against the task's `model` before a run. |
 | `timeout_s` | Per-task kill timer (default 900) |
 | `engine_args` | Extra CLI flags for this task's worker, spliced in at the engine's `{engine_args}` placeholder — e.g. `["-c", "model_reasoning_effort=low"]` so the orchestrator picks reasoning depth per task |
 | `verified` | One plain-English sentence saying what the check proves — shown on the results page next to "finished & checked" |
@@ -249,6 +250,8 @@ Multiple swarms at once is the designed-for case: run batches under different id
 Every worker attempt — pass, fail, timeout, retry — is logged with its spec, engine, duration, token count, and the raw check output. Local JSONL by default; point `[eval.postgres]` at a database to aggregate across machines. Failure rows are the point: they tell you which spec styles, engines, and task shapes actually work, so the swarm gets better on evidence instead of vibes.
 
 ## Model performance log
+
+> **Two views, and who routes.** The CLI scoreboard and catalog below are Ringer's **local** history/routing, keyed on the value in each task's `model` field. On the **Feeder lane** that value is a *class* (`feeder/auto/coding`), and **Feeder** — not Ringer — chooses the actual model, fails over, and scores it. So `./ringer.py catalog` and `models --explore` (Ringer picking a model to try) apply to the **direct lanes** (Codex / Grok / direct OpenRouter); on the Feeder lane you pick a class and Feeder routes. To see the **real served models** and their per-class scores (including Ringer's own graded runs feeding back), use the **Models & Analytics pages in Ringside** (:8700) — see [Ringside](#ringside--mission-control). `./ringer.py models` still works and is useful, but it buckets by the routed alias (`feeder/auto/*`), which is exactly what the UI Analytics page improves on by re-keying on the served model.
 
 ### Model identity taxonomy
 
