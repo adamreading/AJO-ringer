@@ -28,6 +28,14 @@ you via PATCH) — it returns the ANSWER to the client, not a manifest. Root-cau
 we verified mechanics but not the interaction model against Adam's stated intent — **verify the intent,
 not just the wiring.**
 
+**Grounding a RESEARCH/prediction brief (Adam's directive 2026-07-15, when Tavily is capped):** YOU
+(the orchestrator) do the web research yourself with your Claude Code **WebSearch/WebFetch** tools,
+then **bake the gathered facts (with sources) INTO the worker specs** and let the swarm ANALYSE that
+data — workers need no web access. This unblocks research briefs with zero Tavily/paid dependency and
+is the preferred pattern regardless (grounded data beats a worker's blind guess — it flipped the WC#7
+call from a pub-guess to an evidenced one). Reference manifest: `manifests/brief7-wc2026-grounded.json`.
+Only reach for the workers' own Tavily/researcher agent when the research is too broad to pre-gather.
+
 ## Coordination board — how you talk to the fleet
 The board is a shared file both WSL and Windows see (no server). From this repo, always via Bash:
 ```bash

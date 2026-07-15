@@ -1,0 +1,31 @@
+{
+  "run_name": "brief7-wc2026-grounded",
+  "workdir": "/tmp/ringer-brief7-grounded",
+  "max_parallel": 2,
+  "tasks": [
+    {
+      "key": "analyst-market",
+      "task_type": "reasoning",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "spec": "You are a football analyst. Predict the winner of tonight's match using ONLY the RESEARCHED FACTS below (the orchestrator gathered these live from the web; do not invent anything beyond them). Weight the BETTING MARKET most heavily in your call.\n\nRESEARCHED FACTS (FIFA World Cup 2026 semi-final, Wed 15 July 2026, Mercedes-Benz Stadium Atlanta, 3pm ET; winner meets Spain — already through — in the 19 July final):\n- To ADVANCE (FanDuel): England -126 (~57.5% implied), Argentina +114 (~46.7%). England are the market favourite to reach the final.\n- 90-min moneyline: England +170, Draw +180, Argentina +200.\n- Quarter-final form: England beat Norway 2-1 (Kane, Bellingham); Argentina beat Switzerland 3-1 after extra time (Messi involved).\n- Team news: England without SUSPENDED Ezri Konsa (Quansah likely deputises); Argentina have Messi (age 39) fit.\n- Context: Argentina are reigning 2022 champions chasing a 4th title; England chase a first title since 1966.\n- Expert split: Squawka model leans Argentina 53%; ESPN picks mixed (one 2-2 Argentina on penalties, one England 2-1); trend toward Over 2.5 goals.\n\nBoundary: write only report.md in your current task directory. Output report.md with EXACTLY:\n## Answer\n<England or Argentina>, plus a confidence % and the predicted scoreline.\n## Reasoning\n3-5 bullets grounded in the facts above, leading with what the market implies.",
+      "check": "grep -qiE '^##[[:space:]]*Answer' report.md && grep -qiE '(England|Argentina)' report.md && grep -qiE '^##[[:space:]]*Reasoning' report.md && echo 'report well-formed' || { echo 'FAIL: report.md needs ## Answer (a pick) + ## Reasoning'; cat report.md 2>/dev/null; exit 1; }",
+      "expect_files": ["report.md"],
+      "timeout_s": 180,
+      "verified": "report.md has ## Answer with a pick (England/Argentina) + ## Reasoning, grounded in the provided facts"
+    },
+    {
+      "key": "analyst-tactics",
+      "task_type": "reasoning",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "spec": "You are a second, INDEPENDENT football analyst. Predict the winner of tonight's match using ONLY the RESEARCHED FACTS below (gathered live by the orchestrator; invent nothing beyond them). Weight FORM, SQUAD, KEY PLAYERS, tournament pedigree and the team-news most heavily (treat the market as a cross-check, not the driver).\n\nRESEARCHED FACTS (FIFA World Cup 2026 semi-final, Wed 15 July 2026, Mercedes-Benz Stadium Atlanta, 3pm ET; winner meets Spain — already through — in the 19 July final):\n- To ADVANCE (FanDuel): England -126 (~57.5% implied), Argentina +114 (~46.7%).\n- 90-min moneyline: England +170, Draw +180, Argentina +200.\n- Quarter-final form: England beat Norway 2-1 (Kane, Bellingham); Argentina beat Switzerland 3-1 after extra time (Messi involved).\n- Team news: England without SUSPENDED Ezri Konsa (Quansah likely deputises); Argentina have Messi (age 39) fit.\n- Context: Argentina are reigning 2022 champions chasing a 4th title; England chase a first title since 1966.\n- Expert split: Squawka model leans Argentina 53%; ESPN picks mixed (one 2-2 Argentina on penalties, one England 2-1); trend toward Over 2.5 goals.\n\nBoundary: write only report.md in your current task directory. Output report.md with EXACTLY:\n## Answer\n<England or Argentina>, plus a confidence % and the predicted scoreline.\n## Reasoning\n3-5 bullets grounded in the facts above, leading with form/squad/tactics.",
+      "check": "grep -qiE '^##[[:space:]]*Answer' report.md && grep -qiE '(England|Argentina)' report.md && grep -qiE '^##[[:space:]]*Reasoning' report.md && echo 'report well-formed' || { echo 'FAIL: report.md needs ## Answer (a pick) + ## Reasoning'; cat report.md 2>/dev/null; exit 1; }",
+      "expect_files": ["report.md"],
+      "timeout_s": 180,
+      "verified": "report.md has ## Answer with a pick (England/Argentina) + ## Reasoning, grounded in the provided facts"
+    }
+  ]
+}
