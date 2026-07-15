@@ -14,6 +14,7 @@
     currentPage: 'dashboard',
     expandedWorkers: new Map(),   // key → true
     transcripts: new Map(),       // compositeKey → parsed /transcript payload
+    liveModels: new Map(),        // compositeKey → parsed /live-model payload (real served model)
     selectedRun: '',
     selectedArtifact: '',
     artifactVersion: 'live',
@@ -96,15 +97,33 @@
     return run.run_id || run.runId || run.id || 'run-' + i;
   }
 
-  /** The model that ACTUALLY served this task (feeder-enriched), else the routed slug. */
-  function servedModel(task) {
-    var fed = task.feeder || {};
-    var served = fed.served;
+  /** Format a feeder "served" array (platform/model_id, failovers joined with →). */
+  function servedFromArray(served) {
     if (Array.isArray(served) && served.length) {
       return served.map(function (s) {
         return (s.platform ? s.platform + '/' : '') + (s.model_id || '');
       }).join(' → ');
     }
+    return '';
+  }
+
+  /**
+   * The model that ACTUALLY served this task, not the routed slug (feeder/auto/*).
+   * Preference order: live /live-model (works for live AND finished runs while feeder
+   * still has the session rows) → post-run feeder-enriched block → routed slug.
+   */
+  function servedModel(task, compositeKey) {
+    if (compositeKey) {
+      var live = state.liveModels.get(compositeKey);
+      if (live) {
+        var s = servedFromArray(live.served);
+        if (s) return s;
+        if (live.current && live.current.served_model) return live.current.served_model;
+      }
+    }
+    var fed = task.feeder || {};
+    var s2 = servedFromArray(fed.served);
+    if (s2) return s2;
     return task.model || '';
   }
 
@@ -224,6 +243,7 @@
         render();
         fetchExpandedWorkerLogs();
         fetchExpandedTranscripts();
+        fetchLiveModels();
       })
       .catch(function () { /* swallow — don't crash rendering */ });
   }
@@ -795,6 +815,36 @@
     return t.attempts.reduce(function (n, a) { return n + (a.turns ? a.turns.length : 0); }, 0);
   }
 
+  /** Fetch the REAL served model for each expanded worker from /live-model (running = poll;
+   * finished = once). This is what surfaces the actual feeder-served model on the wall even
+   * for runs that were never post-run enriched (e.g. launched outside the ringer ritual). */
+  function fetchLiveModels() {
+    state.expandedWorkers.forEach(function (_v, compositeKey) {
+      var parts = compositeKey.split('::');
+      var rid = parts[0], tkey = parts[1];
+      var run = state.runs.find(function (r) { return r.id === rid; });
+      if (!run) return;
+      var task = run.tasks.find(function (t, ti) { return taskKey(t, ti) === tkey; });
+      if (!task) return;
+      var kind = taskKind(task);
+      var running = (kind === 'working' || kind === 'retry');
+      var prev = state.liveModels.get(compositeKey);
+      // finished + already resolved to a real served model → skip; running → keep polling
+      if (!running && prev && prev.__done) return;
+      fetch(apiUrl('/live-model/' + encodeURIComponent(rid) + '/' + encodeURIComponent(tkey)), { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (!data) return;
+          if (!running && servedFromArray(data.served)) data.__done = true;
+          var before = prev ? servedFromArray(prev.served) : '';
+          var after = servedFromArray(data.served);
+          state.liveModels.set(compositeKey, data);
+          if (before !== after) render();
+        })
+        .catch(function () {});
+    });
+  }
+
   function toolTitle(turn) {
     var inp = turn.input;
     if (inp && typeof inp === 'object') return String(inp.filePath || inp.command || inp.path || inp.pattern || '');
@@ -858,7 +908,7 @@
 
     // Served model — the model that ACTUALLY served this task (feeder-enriched),
     // not the routed slug (feeder/auto/*).
-    var sm = servedModel(task);
+    var sm = servedModel(task, compositeKey);
     if (sm) {
       detail.appendChild(el('div', { className: 'worker-model', text: 'Model: ' + sm, attrs: { 'data-key': 'model-' + compositeKey } }));
     }
@@ -908,6 +958,7 @@
       // fetch immediately so the conversation + log show at once, not on the next poll
       fetchExpandedTranscripts();
       fetchExpandedWorkerLogs();
+      fetchLiveModels();
     }
     render();
   }
