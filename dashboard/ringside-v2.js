@@ -13,6 +13,7 @@
     theme: localStorage.getItem('ringside-theme') || 'dark',
     currentPage: 'dashboard',
     expandedWorkers: new Map(),   // key → true
+    transcripts: new Map(),       // compositeKey → parsed /transcript payload
     selectedRun: '',
     selectedArtifact: '',
     artifactVersion: 'live',
@@ -219,6 +220,7 @@
         normalizeRuns(data);
         render();
         fetchExpandedWorkerLogs();
+        fetchExpandedTranscripts();
       })
       .catch(function () { /* swallow — don't crash rendering */ });
   }
@@ -457,7 +459,11 @@
         have.replaceWith(want);
         return want;
       }
+      // Preserve a user-toggled <details> open state across the 1s re-render
+      // (rendered nodes are always closed, so syncAttrs would otherwise snap it shut).
+      var keepOpen = have.tagName === 'DETAILS' ? have.open : null;
       syncAttrs(have, want);
+      if (keepOpen !== null) have.open = keepOpen;
       morphChildren(have, want);
     }
 
@@ -749,18 +755,95 @@
     return icons[kind] || '○';
   }
 
-  /** Render expanded worker detail: spec, log, verdict. */
+  // ── Live conversation (agent ↔ orchestrator transcript) ───────────────────
+
+  /** Fetch the parsed transcript for each expanded worker (running = poll; else once). */
+  function fetchExpandedTranscripts() {
+    state.expandedWorkers.forEach(function (_v, compositeKey) {
+      var parts = compositeKey.split('::');
+      var rid = parts[0], tkey = parts[1];
+      var run = state.runs.find(function (r) { return r.id === rid; });
+      if (!run) return;
+      var task = run.tasks.find(function (t, ti) { return taskKey(t, ti) === tkey; });
+      if (!task) return;
+      var kind = taskKind(task);
+      var running = (kind === 'working' || kind === 'retry');
+      // finished + already loaded → skip; running → poll every tick
+      if (!running && state.transcripts.get(compositeKey) && state.transcripts.get(compositeKey).__done) return;
+      fetch(apiUrl('/transcript/' + encodeURIComponent(rid) + '/' + encodeURIComponent(tkey)), { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (!data) return;
+          if (!running) data.__done = true;
+          var prev = state.transcripts.get(compositeKey);
+          // only re-render if the turn count changed (avoid pointless churn/scroll jumps)
+          var changed = !prev || turnCount(prev) !== turnCount(data);
+          state.transcripts.set(compositeKey, data);
+          if (changed) render();
+        })
+        .catch(function () {});
+    });
+  }
+
+  function turnCount(t) {
+    if (!t || !Array.isArray(t.attempts)) return 0;
+    return t.attempts.reduce(function (n, a) { return n + (a.turns ? a.turns.length : 0); }, 0);
+  }
+
+  function toolTitle(turn) {
+    var inp = turn.input;
+    if (inp && typeof inp === 'object') return String(inp.filePath || inp.command || inp.path || inp.pattern || '');
+    return '';
+  }
+
+  /** One conversation turn → a chat bubble. */
+  function renderTurn(turn) {
+    var wrap = el('div', { className: 'turn', attrs: { 'data-role': turn.role || '', 'data-kind': turn.kind || '' } });
+    if (turn.role === 'orchestrator') {
+      var od = el('details', { className: 'bubble orch' });
+      od.appendChild(el('summary', { text: turn.kind === 'retry_reply' ? 'Orchestrator ↩ sent it back (previous attempt failed)' : 'Orchestrator → the brief' }));
+      od.appendChild(el('pre', { text: String(turn.text || '') }));
+      wrap.appendChild(od);
+    } else if (turn.kind === 'text') {
+      wrap.appendChild(el('div', { className: 'bubble worker', text: String(turn.text || '') }));
+    } else if (turn.kind === 'tool') {
+      var td = el('details', { className: 'bubble worker tool', attrs: { 'data-tool': turn.tool || '' } });
+      var title = toolTitle(turn);
+      td.appendChild(el('summary', { text: '🔧 ' + (turn.tool || 'tool') + (title ? ' · ' + title : '') }));
+      if (turn.input != null && turn.input !== '') td.appendChild(el('pre', { text: stringify(turn.input) }));
+      if (turn.output != null && turn.output !== '') { var po = el('pre', { className: 'tool-out', text: stringify(turn.output) }); td.appendChild(po); }
+      wrap.appendChild(td);
+    } else if (turn.kind === 'step') {
+      var tok = turn.tokens && turn.tokens.total ? formatTokens(turn.tokens.total) + ' tok' : '';
+      wrap.appendChild(el('div', { className: 'turn-step', text: '· ' + (turn.reason || 'step') + (tok ? ' · ' + tok : '') }));
+    } else if (turn.kind === 'error') {
+      wrap.appendChild(el('div', { className: 'bubble worker error', text: '⚠ ' + (turn.message || turn.name || 'error') }));
+    }
+    return wrap;
+  }
+
+  /** Render the whole transcript (attempts → turns) into a container. */
+  function renderTranscript(container, transcript) {
+    var attempts = transcript && Array.isArray(transcript.attempts) ? transcript.attempts : [];
+    if (!attempts.length) {
+      container.appendChild(el('div', { className: 'turn-empty', text: transcript && transcript.status === 'error' ? 'Transcript unavailable.' : 'Waiting for the conversation…' }));
+      return;
+    }
+    attempts.forEach(function (att) {
+      if (attempts.length > 1) {
+        container.appendChild(el('div', {
+          className: 'attempt-sep',
+          attrs: { 'data-outcome': att.outcome || '' },
+          text: 'Attempt ' + att.n + ' · ' + (att.outcome || '') + (att.rc != null ? ' · rc=' + att.rc : ''),
+        }));
+      }
+      (att.turns || []).forEach(function (turn) { container.appendChild(renderTurn(turn)); });
+    });
+  }
+
+  /** Render expanded worker detail: spec, LIVE CONVERSATION, raw log (collapsed), verdict. */
   function renderWorkerDetail(run, task, compositeKey) {
     var detail = el('div', { className: 'worker-detail' });
-
-    // Spec brief (collapsible)
-    if (task.spec || task.brief || task.description) {
-      var specText = task.spec || task.brief || task.description;
-      var specSection = el('details', { className: 'worker-spec' });
-      specSection.appendChild(el('summary', { text: 'Spec' }));
-      specSection.appendChild(el('p', { text: specText }));
-      detail.appendChild(specSection);
-    }
 
     // Served model — the model that ACTUALLY served this task (feeder-enriched),
     // not the routed slug (feeder/auto/*).
@@ -769,15 +852,27 @@
       detail.appendChild(el('div', { className: 'worker-model', text: 'Model: ' + sm }));
     }
 
-    // Live log stream — seed from the embedded tail so it's never blank. Worker.log
-    // files live in /tmp and can be reaped; the run JSON always carries log_tail_full.
+    // LIVE CONVERSATION — the agent's readable transcript with the orchestrator
+    // (the brief it was handed → its text/tool/step turns → retries). This is the
+    // main pane; fed by the /transcript route, cached in state.transcripts.
+    var convo = el('div', {
+      className: 'worker-convo',
+      attrs: { 'data-key': 'convo-' + compositeKey, 'data-transcript-key': compositeKey },
+    });
+    renderTranscript(convo, state.transcripts.get(compositeKey));
+    detail.appendChild(convo);
+
+    // Raw log — escape hatch, collapsed. Seeded from the embedded tail so it is never
+    // blank (worker.log files live in /tmp and can be reaped; the run JSON keeps a tail).
     var seed = stripAnsi(task.log_tail_full || task.log_tail || '');
-    var logPre = el('pre', {
+    var logDetails = el('details', { className: 'worker-rawlog' });
+    logDetails.appendChild(el('summary', { text: 'Raw log' }));
+    logDetails.appendChild(el('pre', {
       className: 'worker-log',
       attrs: { 'data-log-key': compositeKey },
       text: seed || 'Loading log...',
-    });
-    detail.appendChild(logPre);
+    }));
+    detail.appendChild(logDetails);
 
     // Verification verdict
     if (task.verdict || task.result) {

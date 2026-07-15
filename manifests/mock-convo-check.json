@@ -1,0 +1,20 @@
+{
+  "run_name": "mock-convo-check",
+  "workdir": "/tmp/ringer-mock-convo",
+  "max_parallel": 1,
+  "tasks": [
+    {
+      "key": "alpha",
+      "task_type": "probe",
+      "wire_class": "coding",
+      "engine": "mock",
+      "timeout_s": 60,
+      "spec": "You are a zero-cost mock worker proving the Ringside v2 conversation pane renders real turns without needing feeder. Produce alpha.txt.\nMOCK_FILE: alpha.txt\nhello from the mock worker\nMOCK_END",
+      "check": "test -f /tmp/ringer-mock-convo/alpha/alpha.txt && grep -q 'mock worker' /tmp/ringer-mock-convo/alpha/alpha.txt && echo 'mock ok' || { echo 'FAIL: alpha.txt missing/wrong'; exit 1; }",
+      "expect_files": [
+        "alpha.txt"
+      ],
+      "verified": "alpha.txt exists and contains the mock worker's line (executed)"
+    }
+  ]
+}
