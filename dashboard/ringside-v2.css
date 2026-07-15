@@ -1704,3 +1704,29 @@ button {
   font-size: 11px;
   color: var(--muted);
 }
+
+/* ── Models page: best-model-per-class finder ────────────────────────────── */
+.models-classbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.class-chip {
+  font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 5px 11px; border: 1px solid var(--hairline); border-radius: 999px;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.class-chip:hover { color: var(--ink); border-color: var(--accent-glow); }
+.class-chip.active { color: var(--ground); background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.models-hint { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.models-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.models-table th {
+  text-align: left; font-family: var(--font-mono); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+  padding: 6px 10px; border-bottom: 1px solid var(--hairline);
+}
+.models-table td { padding: 7px 10px; border-bottom: 1px solid var(--hairline); }
+.models-table tr:hover td { background: rgba(53, 208, 255, 0.04); }
+.models-table .rank { color: var(--muted); font-family: var(--font-mono); }
+.models-table .score { font-family: var(--font-mono); font-weight: 700; color: var(--accent); }
+.models-table .muted { color: var(--muted); }
+.src-badge { color: var(--pass); font-size: 11px; }
+.health-healthy { color: var(--pass); }
+.health-degraded { color: var(--working); }
+.health-down, .health-unhealthy { color: var(--fail); }

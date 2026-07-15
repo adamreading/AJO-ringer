@@ -18,6 +18,9 @@
     selectedArtifact: '',
     artifactVersion: 'live',
     modelsData: null,
+    canon: [],            // feeder's real model catalog (/api/canon)
+    usage: [],            // Ringer's served-model x class outcomes (/api/usage)
+    modelsClass: 'coding',// selected class on the Models best-per-class finder
     apiBase: '',
     kirbyActive: false,
     kirbyShiftStart: 0,
@@ -236,14 +239,16 @@
   }
 
   function fetchModels() {
-    fetch(apiUrl('/api/models'), { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        state.modelsData = data;
-        render();
-        setTimeout(buildAnalytics, 100);
-      })
-      .catch(function () {});
+    // Real feeder catalog + Ringer's own served-model outcomes (plus legacy scoreboard).
+    var get = function (p) { return fetch(apiUrl(p), { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }); };
+    Promise.all([get('/api/models'), get('/api/canon'), get('/api/usage')]).then(function (res) {
+      if (res[0]) state.modelsData = res[0];
+      if (res[1]) state.canon = res[1].models || [];
+      if (res[2]) state.usage = res[2].usage || [];
+      render();
+      renderModelsPage();
+      setTimeout(buildAnalytics, 100);
+    });
   }
 
 
@@ -1058,7 +1063,37 @@
 
   var analyticsCharts = {};  // track Chart.js instances for cleanup
 
+  /** Look up a served model's recent latency from the feeder canon (instance match). */
+  function servedLatency(servedModel) {
+    var parts = String(servedModel || '').split('/');
+    var platform = parts.shift(); var modelId = parts.join('/');
+    var canon = state.canon || [];
+    for (var i = 0; i < canon.length; i++) {
+      var ins = canon[i].instances || [];
+      for (var j = 0; j < ins.length; j++) {
+        if (ins[j].platform === platform && ins[j].model_id === modelId) return numberOrZero(ins[j].recent_latency_ms);
+      }
+    }
+    return 0;
+  }
+
   function getModelsArray() {
+    // Prefer Ringer's REAL served-model x task-class outcomes (/api/usage) — what the
+    // swarm actually ran, keyed on the model that truly served + the real wire-class.
+    if (state.usage && state.usage.length) {
+      return state.usage.map(function (u) {
+        return {
+          model: u.served_model,
+          task_class: u.task_class,
+          quality: numberOrZero(u.pass_rate),
+          first_try_pass: numberOrZero(u.first_try_pass_rate),
+          latency: servedLatency(u.served_model),
+          requests: numberOrZero(u.tasks),
+          tokens: numberOrZero(u.tokens),
+        };
+      });
+    }
+    // Fallback: legacy routed-slug scoreboard (before any run is feeder-enriched).
     if (!state.modelsData) return [];
     var source = Array.isArray(state.modelsData) ? state.modelsData : (state.modelsData.models || state.modelsData.scoreboard || state.modelsData.rollup || []);
     var normalized = [];
@@ -1102,11 +1137,90 @@
     });
   }
 
+  // ── Models page: best-model-per-class finder (from feeder /api/canon) ──────
+  var WIRE_CLASSES = ['coding', 'reasoning', 'creative_writing', 'instruction_following', 'long_query', 'multi_turn'];
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+  function fmtCtx(n) { n = Number(n) || 0; return n >= 1000 ? Math.round(n / 1000) + 'k' : String(n); }
+
+  function canonClassScore(m, cls) {
+    var ts = m.taskScores || [];
+    for (var i = 0; i < ts.length; i++) if (ts[i].task_type === cls) return ts[i];
+    return null;
+  }
+  function primaryInstance(m) {
+    var ins = m.instances || [];
+    var enabled = ins.filter(function (x) { return x.enabled; });
+    return enabled[0] || ins[0] || {};
+  }
+  function bestForClass(cls) {
+    return (state.canon || []).map(function (m) {
+      var s = canonClassScore(m, cls);
+      var pi = primaryInstance(m);
+      return {
+        name: m.name || m.slug || 'unknown',
+        score: s ? s.score : null,
+        source: s ? s.source : null,
+        platform: pi.platform || '',
+        platforms: (m.instances || []).length,
+        cost: pi.cost_tier || '',
+        speedRank: pi.speed_rank,
+        intelRank: pi.intelligence_rank,
+        health: pi.health_status || '',
+        context: pi.context_window,
+        enabled: (m.instances || []).some(function (x) { return x.enabled; }),
+      };
+    }).filter(function (r) { return r.score != null && r.enabled; })
+      .sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
+  }
+
+  function renderModelsPage() {
+    var host = document.getElementById('models-content');
+    if (!host) return;
+    var cls = state.modelsClass || 'coding';
+    var rows = bestForClass(cls);
+    var chips = WIRE_CLASSES.map(function (c) {
+      return '<button class="class-chip' + (c === cls ? ' active' : '') + '" data-class="' + c + '">' + esc(c.replace(/_/g, ' ')) + '</button>';
+    }).join('');
+    var html = '<div class="models-classbar">' + chips + '</div>';
+    if (!rows.length) {
+      html += '<p class="turn-empty">No feeder catalog yet — is feeder up on :3001?</p>';
+    } else {
+      html += '<div class="models-hint">Best models for <strong>' + esc(cls.replace(/_/g, ' ')) + '</strong>, ranked by feeder score (◉ = includes Ringer\'s graded runs).</div>';
+      html += '<table class="models-table"><thead><tr><th>#</th><th>Model</th><th>Score</th><th>Platform</th><th>Cost</th><th>Speed</th><th>Intel</th><th>Context</th><th>Health</th></tr></thead><tbody>';
+      rows.forEach(function (r, i) {
+        var live = r.source === 'realtime_quality' ? ' <span class="src-badge" title="score includes Ringer graded runs">◉</span>' : '';
+        html += '<tr>' +
+          '<td class="rank">' + (i + 1) + '</td>' +
+          '<td><strong>' + esc(r.name) + '</strong>' + live + '</td>' +
+          '<td class="score">' + (r.score != null ? Math.round(r.score * 100) + '%' : '—') + '</td>' +
+          '<td>' + esc(r.platform) + (r.platforms > 1 ? ' <span class="muted">+' + (r.platforms - 1) + '</span>' : '') + '</td>' +
+          '<td>' + esc(r.cost || '—') + '</td>' +
+          '<td>' + (r.speedRank != null && r.speedRank < 500 ? '#' + r.speedRank : '—') + '</td>' +
+          '<td>' + (r.intelRank != null && r.intelRank < 500 ? '#' + r.intelRank : '—') + '</td>' +
+          '<td>' + (r.context ? fmtCtx(r.context) : '—') + '</td>' +
+          '<td class="health health-' + esc(r.health) + '">' + esc(r.health || '—') + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+    host.innerHTML = html;
+    host.querySelectorAll('.class-chip').forEach(function (b) {
+      b.addEventListener('click', function () { state.modelsClass = b.dataset.class; renderModelsPage(); });
+    });
+  }
+
   /** Build all analytics charts and summary KPIs. */
   function buildAnalytics() {
     var models = getModelsArray();
     var statusEl = document.getElementById('analytics-data-status');
-    if (statusEl) statusEl.textContent = models.length ? 'Live local scoreboard' : 'No local scoreboard data yet';
+    if (statusEl) statusEl.textContent = models.length
+      ? (state.usage && state.usage.length ? 'Ringer served-model outcomes (real, by class)' : 'Legacy routed-slug scoreboard (no enriched runs yet)')
+      : 'No run outcomes yet';
     if (models.length === 0) return;
 
     var C = chartColors();
@@ -1438,13 +1552,14 @@
       panel.style.display = panel.dataset.page === page ? 'block' : 'none';
     });
 
-    // Fetch models data on analytics/models visit, then build charts
+    // Fetch real feeder catalog + usage on analytics/models visit, then render.
     if (page === 'analytics' || page === 'models') {
-      if (!state.modelsData) {
-        fetchModels();
+      if (!state.canon.length && !state.usage.length && !state.modelsData) {
+        fetchModels(); // renders both pages when data lands
+      } else if (page === 'models') {
+        renderModelsPage();
       } else {
-        // Re-build charts (they need fresh canvas contexts after DOM show/hide)
-        setTimeout(buildAnalytics, 50);
+        setTimeout(buildAnalytics, 50); // fresh canvas contexts after show/hide
       }
     }
 
