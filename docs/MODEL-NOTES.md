@@ -369,3 +369,19 @@ checks and raw logs support — no vibes, no worker self-reports.
   failed (opencode's write tool flagged exists:false). FIX: added a "write the BARE
   relative filename, never an absolute path" rule to the researcher agent prompt;
   keep research workdirs SHORT. Standing guidance: cap Tavily research swarms ~4-5.
+
+- 2026-07-15 — free-tier-provider-scout (8 research tasks, feeder/auto/reasoning +
+  researcher/Tavily, 4-way). 7/8 pass. Two lessons: (1) TAVILY FREE KEY CAP is small —
+  8 research tasks (many searches each) exhausted the tvly-dev key mid-run ("exceeds
+  your plan's usage limit" across every task); workers coped by falling back to direct
+  official-page fetches, so reports stayed well-sourced, but research swarms will
+  degrade until the Tavily quota resets / a higher tier. (2) Tavily-limit errors drove
+  heavy feeder FAILOVER, so 7/8 tasks were mixed_models → quality_feed can only POST
+  the 1 non-mixed sample (fireworks→nvidia/nemotron-3-super-120b-a12b, 0.9); grades
+  still persist to the wall for all. huggingface FAILED: attempt-1 died on a served-model
+  quirk ("assistant messages must include non-empty content" mid tool-loop), attempt-2
+  researched but never wrote report.md (ended on a text turn) → check correctly failed
+  on the missing deliverable. Output quality of the reasoning lane on this research +
+  strict-criteria judgment task was high (correct ADD/SKIP calls, honest about
+  uncertainty). Grades: novita 0.95, together/fireworks 0.9, scaleway 0.75, cohere/
+  chutes/hyperbolic 0.7 (retry-rescued but strong), huggingface 0.2 (no deliverable).

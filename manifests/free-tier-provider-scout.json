@@ -1,0 +1,151 @@
+{
+  "run_name": "free-tier-provider-scout",
+  "workdir": "/tmp/rtier",
+  "max_parallel": 4,
+  "tasks": [
+    {
+      "key": "huggingface",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": [
+        "--agent",
+        "researcher"
+      ],
+      "timeout_s": 360,
+      "spec": "You are a research worker assessing the LLM API provider 'huggingface' as a candidate free tier to ADD to our onboarding. You have LIVE web access via a Tavily search tool; your training data is stale on pricing, so you MUST search official sources (pricing / docs / signup pages) and cross-check across at least two independent OFFICIAL sources \u2014 do not answer from memory.\n\nWhere to look: Hugging Face Inference Providers / serverless Inference API \u2014 huggingface.co and huggingface.co/docs (monthly free inference credit/quota).\n\nOur rules are STRICT. Recommend ADD only if ALL THREE hold:\n1) WORTHWHILE free tier \u2014 a meaningful, ongoing free allowance for LLM API calls (enough daily/monthly tokens or requests to be genuinely useful), not a tiny one-off trial.\n2) NO credit card required to sign up and get a working API key.\n3) HARD CUTOFF at the limit \u2014 when the free allowance runs out it STOPS serving; it must NOT silently roll over to paid or auto-charge.\nIf ANY of the three is false, or you cannot confirm it from official sources, recommend SKIP \u2014 be conservative: an unconfirmed no-card or unconfirmed hard-cutoff is a SKIP, not an ADD.\n\nWrite ONLY the bare relative filename report.md in your current working directory (never an absolute path), with EXACTLY these sections:\n## Verdict\nADD or SKIP, plus a one-sentence reason.\n## Free tier\nWhat you get free \u2014 models available, and the token/request allowance per day or per month, with the concrete numbers.\n## Credit card\nIs a credit card required to sign up / obtain an API key? yes or no, with the evidence you found.\n## At limit\nWhat happens when the free allowance runs out \u2014 HARD CUTOFF (stops serving) or does it roll over to paid / auto-charge? State clearly; if unclear, say so.\n## Sources\nA bulleted list of the full https:// OFFICIAL URLs you actually opened (at least two).\n\nCreate only report.md. Do not create or modify any other file, and do not commit anything.",
+      "check": "sh /home/ajo/ringer/scripts/checks/free_tier_provider_check.sh",
+      "verified": "report.md gives an ADD/SKIP verdict with free-tier/card/at-limit sections, >=2 official sources, and worker.log proves a live Tavily search (executed)",
+      "expect_files": [
+        "report.md"
+      ]
+    },
+    {
+      "key": "cohere",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": [
+        "--agent",
+        "researcher"
+      ],
+      "timeout_s": 360,
+      "spec": "You are a research worker assessing the LLM API provider 'cohere' as a candidate free tier to ADD to our onboarding. You have LIVE web access via a Tavily search tool; your training data is stale on pricing, so you MUST search official sources (pricing / docs / signup pages) and cross-check across at least two independent OFFICIAL sources \u2014 do not answer from memory.\n\nWhere to look: Cohere trial API keys \u2014 cohere.com and docs.cohere.com (rate-limited free trial keys).\n\nOur rules are STRICT. Recommend ADD only if ALL THREE hold:\n1) WORTHWHILE free tier \u2014 a meaningful, ongoing free allowance for LLM API calls (enough daily/monthly tokens or requests to be genuinely useful), not a tiny one-off trial.\n2) NO credit card required to sign up and get a working API key.\n3) HARD CUTOFF at the limit \u2014 when the free allowance runs out it STOPS serving; it must NOT silently roll over to paid or auto-charge.\nIf ANY of the three is false, or you cannot confirm it from official sources, recommend SKIP \u2014 be conservative: an unconfirmed no-card or unconfirmed hard-cutoff is a SKIP, not an ADD.\n\nWrite ONLY the bare relative filename report.md in your current working directory (never an absolute path), with EXACTLY these sections:\n## Verdict\nADD or SKIP, plus a one-sentence reason.\n## Free tier\nWhat you get free \u2014 models available, and the token/request allowance per day or per month, with the concrete numbers.\n## Credit card\nIs a credit card required to sign up / obtain an API key? yes or no, with the evidence you found.\n## At limit\nWhat happens when the free allowance runs out \u2014 HARD CUTOFF (stops serving) or does it roll over to paid / auto-charge? State clearly; if unclear, say so.\n## Sources\nA bulleted list of the full https:// OFFICIAL URLs you actually opened (at least two).\n\nCreate only report.md. Do not create or modify any other file, and do not commit anything.",
+      "check": "sh /home/ajo/ringer/scripts/checks/free_tier_provider_check.sh",
+      "verified": "report.md gives an ADD/SKIP verdict with free-tier/card/at-limit sections, >=2 official sources, and worker.log proves a live Tavily search (executed)",
+      "expect_files": [
+        "report.md"
+      ]
+    },
+    {
+      "key": "together",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": [
+        "--agent",
+        "researcher"
+      ],
+      "timeout_s": 360,
+      "spec": "You are a research worker assessing the LLM API provider 'together' as a candidate free tier to ADD to our onboarding. You have LIVE web access via a Tavily search tool; your training data is stale on pricing, so you MUST search official sources (pricing / docs / signup pages) and cross-check across at least two independent OFFICIAL sources \u2014 do not answer from memory.\n\nWhere to look: Together AI \u2014 together.ai and api.together.ai / docs.together.ai (signup credits and any free models).\n\nOur rules are STRICT. Recommend ADD only if ALL THREE hold:\n1) WORTHWHILE free tier \u2014 a meaningful, ongoing free allowance for LLM API calls (enough daily/monthly tokens or requests to be genuinely useful), not a tiny one-off trial.\n2) NO credit card required to sign up and get a working API key.\n3) HARD CUTOFF at the limit \u2014 when the free allowance runs out it STOPS serving; it must NOT silently roll over to paid or auto-charge.\nIf ANY of the three is false, or you cannot confirm it from official sources, recommend SKIP \u2014 be conservative: an unconfirmed no-card or unconfirmed hard-cutoff is a SKIP, not an ADD.\n\nWrite ONLY the bare relative filename report.md in your current working directory (never an absolute path), with EXACTLY these sections:\n## Verdict\nADD or SKIP, plus a one-sentence reason.\n## Free tier\nWhat you get free \u2014 models available, and the token/request allowance per day or per month, with the concrete numbers.\n## Credit card\nIs a credit card required to sign up / obtain an API key? yes or no, with the evidence you found.\n## At limit\nWhat happens when the free allowance runs out \u2014 HARD CUTOFF (stops serving) or does it roll over to paid / auto-charge? State clearly; if unclear, say so.\n## Sources\nA bulleted list of the full https:// OFFICIAL URLs you actually opened (at least two).\n\nCreate only report.md. Do not create or modify any other file, and do not commit anything.",
+      "check": "sh /home/ajo/ringer/scripts/checks/free_tier_provider_check.sh",
+      "verified": "report.md gives an ADD/SKIP verdict with free-tier/card/at-limit sections, >=2 official sources, and worker.log proves a live Tavily search (executed)",
+      "expect_files": [
+        "report.md"
+      ]
+    },
+    {
+      "key": "fireworks",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": [
+        "--agent",
+        "researcher"
+      ],
+      "timeout_s": 360,
+      "spec": "You are a research worker assessing the LLM API provider 'fireworks' as a candidate free tier to ADD to our onboarding. You have LIVE web access via a Tavily search tool; your training data is stale on pricing, so you MUST search official sources (pricing / docs / signup pages) and cross-check across at least two independent OFFICIAL sources \u2014 do not answer from memory.\n\nWhere to look: Fireworks AI \u2014 fireworks.ai and docs.fireworks.ai (free credits / free tier).\n\nOur rules are STRICT. Recommend ADD only if ALL THREE hold:\n1) WORTHWHILE free tier \u2014 a meaningful, ongoing free allowance for LLM API calls (enough daily/monthly tokens or requests to be genuinely useful), not a tiny one-off trial.\n2) NO credit card required to sign up and get a working API key.\n3) HARD CUTOFF at the limit \u2014 when the free allowance runs out it STOPS serving; it must NOT silently roll over to paid or auto-charge.\nIf ANY of the three is false, or you cannot confirm it from official sources, recommend SKIP \u2014 be conservative: an unconfirmed no-card or unconfirmed hard-cutoff is a SKIP, not an ADD.\n\nWrite ONLY the bare relative filename report.md in your current working directory (never an absolute path), with EXACTLY these sections:\n## Verdict\nADD or SKIP, plus a one-sentence reason.\n## Free tier\nWhat you get free \u2014 models available, and the token/request allowance per day or per month, with the concrete numbers.\n## Credit card\nIs a credit card required to sign up / obtain an API key? yes or no, with the evidence you found.\n## At limit\nWhat happens when the free allowance runs out \u2014 HARD CUTOFF (stops serving) or does it roll over to paid / auto-charge? State clearly; if unclear, say so.\n## Sources\nA bulleted list of the full https:// OFFICIAL URLs you actually opened (at least two).\n\nCreate only report.md. Do not create or modify any other file, and do not commit anything.",
+      "check": "sh /home/ajo/ringer/scripts/checks/free_tier_provider_check.sh",
+      "verified": "report.md gives an ADD/SKIP verdict with free-tier/card/at-limit sections, >=2 official sources, and worker.log proves a live Tavily search (executed)",
+      "expect_files": [
+        "report.md"
+      ]
+    },
+    {
+      "key": "novita",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": [
+        "--agent",
+        "researcher"
+      ],
+      "timeout_s": 360,
+      "spec": "You are a research worker assessing the LLM API provider 'novita' as a candidate free tier to ADD to our onboarding. You have LIVE web access via a Tavily search tool; your training data is stale on pricing, so you MUST search official sources (pricing / docs / signup pages) and cross-check across at least two independent OFFICIAL sources \u2014 do not answer from memory.\n\nWhere to look: Novita AI \u2014 novita.ai and novita.ai/docs (free credits for the LLM API).\n\nOur rules are STRICT. Recommend ADD only if ALL THREE hold:\n1) WORTHWHILE free tier \u2014 a meaningful, ongoing free allowance for LLM API calls (enough daily/monthly tokens or requests to be genuinely useful), not a tiny one-off trial.\n2) NO credit card required to sign up and get a working API key.\n3) HARD CUTOFF at the limit \u2014 when the free allowance runs out it STOPS serving; it must NOT silently roll over to paid or auto-charge.\nIf ANY of the three is false, or you cannot confirm it from official sources, recommend SKIP \u2014 be conservative: an unconfirmed no-card or unconfirmed hard-cutoff is a SKIP, not an ADD.\n\nWrite ONLY the bare relative filename report.md in your current working directory (never an absolute path), with EXACTLY these sections:\n## Verdict\nADD or SKIP, plus a one-sentence reason.\n## Free tier\nWhat you get free \u2014 models available, and the token/request allowance per day or per month, with the concrete numbers.\n## Credit card\nIs a credit card required to sign up / obtain an API key? yes or no, with the evidence you found.\n## At limit\nWhat happens when the free allowance runs out \u2014 HARD CUTOFF (stops serving) or does it roll over to paid / auto-charge? State clearly; if unclear, say so.\n## Sources\nA bulleted list of the full https:// OFFICIAL URLs you actually opened (at least two).\n\nCreate only report.md. Do not create or modify any other file, and do not commit anything.",
+      "check": "sh /home/ajo/ringer/scripts/checks/free_tier_provider_check.sh",
+      "verified": "report.md gives an ADD/SKIP verdict with free-tier/card/at-limit sections, >=2 official sources, and worker.log proves a live Tavily search (executed)",
+      "expect_files": [
+        "report.md"
+      ]
+    },
+    {
+      "key": "chutes",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": [
+        "--agent",
+        "researcher"
+      ],
+      "timeout_s": 360,
+      "spec": "You are a research worker assessing the LLM API provider 'chutes' as a candidate free tier to ADD to our onboarding. You have LIVE web access via a Tavily search tool; your training data is stale on pricing, so you MUST search official sources (pricing / docs / signup pages) and cross-check across at least two independent OFFICIAL sources \u2014 do not answer from memory.\n\nWhere to look: Chutes.ai \u2014 chutes.ai and docs.chutes.ai (free / decentralised inference tier).\n\nOur rules are STRICT. Recommend ADD only if ALL THREE hold:\n1) WORTHWHILE free tier \u2014 a meaningful, ongoing free allowance for LLM API calls (enough daily/monthly tokens or requests to be genuinely useful), not a tiny one-off trial.\n2) NO credit card required to sign up and get a working API key.\n3) HARD CUTOFF at the limit \u2014 when the free allowance runs out it STOPS serving; it must NOT silently roll over to paid or auto-charge.\nIf ANY of the three is false, or you cannot confirm it from official sources, recommend SKIP \u2014 be conservative: an unconfirmed no-card or unconfirmed hard-cutoff is a SKIP, not an ADD.\n\nWrite ONLY the bare relative filename report.md in your current working directory (never an absolute path), with EXACTLY these sections:\n## Verdict\nADD or SKIP, plus a one-sentence reason.\n## Free tier\nWhat you get free \u2014 models available, and the token/request allowance per day or per month, with the concrete numbers.\n## Credit card\nIs a credit card required to sign up / obtain an API key? yes or no, with the evidence you found.\n## At limit\nWhat happens when the free allowance runs out \u2014 HARD CUTOFF (stops serving) or does it roll over to paid / auto-charge? State clearly; if unclear, say so.\n## Sources\nA bulleted list of the full https:// OFFICIAL URLs you actually opened (at least two).\n\nCreate only report.md. Do not create or modify any other file, and do not commit anything.",
+      "check": "sh /home/ajo/ringer/scripts/checks/free_tier_provider_check.sh",
+      "verified": "report.md gives an ADD/SKIP verdict with free-tier/card/at-limit sections, >=2 official sources, and worker.log proves a live Tavily search (executed)",
+      "expect_files": [
+        "report.md"
+      ]
+    },
+    {
+      "key": "scaleway",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": [
+        "--agent",
+        "researcher"
+      ],
+      "timeout_s": 360,
+      "spec": "You are a research worker assessing the LLM API provider 'scaleway' as a candidate free tier to ADD to our onboarding. You have LIVE web access via a Tavily search tool; your training data is stale on pricing, so you MUST search official sources (pricing / docs / signup pages) and cross-check across at least two independent OFFICIAL sources \u2014 do not answer from memory.\n\nWhere to look: Scaleway Generative APIs \u2014 scaleway.com and scaleway.com/en/docs (free beta / free tier for LLM inference).\n\nOur rules are STRICT. Recommend ADD only if ALL THREE hold:\n1) WORTHWHILE free tier \u2014 a meaningful, ongoing free allowance for LLM API calls (enough daily/monthly tokens or requests to be genuinely useful), not a tiny one-off trial.\n2) NO credit card required to sign up and get a working API key.\n3) HARD CUTOFF at the limit \u2014 when the free allowance runs out it STOPS serving; it must NOT silently roll over to paid or auto-charge.\nIf ANY of the three is false, or you cannot confirm it from official sources, recommend SKIP \u2014 be conservative: an unconfirmed no-card or unconfirmed hard-cutoff is a SKIP, not an ADD.\n\nWrite ONLY the bare relative filename report.md in your current working directory (never an absolute path), with EXACTLY these sections:\n## Verdict\nADD or SKIP, plus a one-sentence reason.\n## Free tier\nWhat you get free \u2014 models available, and the token/request allowance per day or per month, with the concrete numbers.\n## Credit card\nIs a credit card required to sign up / obtain an API key? yes or no, with the evidence you found.\n## At limit\nWhat happens when the free allowance runs out \u2014 HARD CUTOFF (stops serving) or does it roll over to paid / auto-charge? State clearly; if unclear, say so.\n## Sources\nA bulleted list of the full https:// OFFICIAL URLs you actually opened (at least two).\n\nCreate only report.md. Do not create or modify any other file, and do not commit anything.",
+      "check": "sh /home/ajo/ringer/scripts/checks/free_tier_provider_check.sh",
+      "verified": "report.md gives an ADD/SKIP verdict with free-tier/card/at-limit sections, >=2 official sources, and worker.log proves a live Tavily search (executed)",
+      "expect_files": [
+        "report.md"
+      ]
+    },
+    {
+      "key": "hyperbolic",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "engine_args": [
+        "--agent",
+        "researcher"
+      ],
+      "timeout_s": 360,
+      "spec": "You are a research worker assessing the LLM API provider 'hyperbolic' as a candidate free tier to ADD to our onboarding. You have LIVE web access via a Tavily search tool; your training data is stale on pricing, so you MUST search official sources (pricing / docs / signup pages) and cross-check across at least two independent OFFICIAL sources \u2014 do not answer from memory.\n\nWhere to look: Hyperbolic \u2014 hyperbolic.xyz / app.hyperbolic.ai and docs.hyperbolic.xyz (free credits for the inference API).\n\nOur rules are STRICT. Recommend ADD only if ALL THREE hold:\n1) WORTHWHILE free tier \u2014 a meaningful, ongoing free allowance for LLM API calls (enough daily/monthly tokens or requests to be genuinely useful), not a tiny one-off trial.\n2) NO credit card required to sign up and get a working API key.\n3) HARD CUTOFF at the limit \u2014 when the free allowance runs out it STOPS serving; it must NOT silently roll over to paid or auto-charge.\nIf ANY of the three is false, or you cannot confirm it from official sources, recommend SKIP \u2014 be conservative: an unconfirmed no-card or unconfirmed hard-cutoff is a SKIP, not an ADD.\n\nWrite ONLY the bare relative filename report.md in your current working directory (never an absolute path), with EXACTLY these sections:\n## Verdict\nADD or SKIP, plus a one-sentence reason.\n## Free tier\nWhat you get free \u2014 models available, and the token/request allowance per day or per month, with the concrete numbers.\n## Credit card\nIs a credit card required to sign up / obtain an API key? yes or no, with the evidence you found.\n## At limit\nWhat happens when the free allowance runs out \u2014 HARD CUTOFF (stops serving) or does it roll over to paid / auto-charge? State clearly; if unclear, say so.\n## Sources\nA bulleted list of the full https:// OFFICIAL URLs you actually opened (at least two).\n\nCreate only report.md. Do not create or modify any other file, and do not commit anything.",
+      "check": "sh /home/ajo/ringer/scripts/checks/free_tier_provider_check.sh",
+      "verified": "report.md gives an ADD/SKIP verdict with free-tier/card/at-limit sections, >=2 official sources, and worker.log proves a live Tavily search (executed)",
+      "expect_files": [
+        "report.md"
+      ]
+    }
+  ]
+}
