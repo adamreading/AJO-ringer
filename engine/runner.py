@@ -26,6 +26,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -43,6 +44,20 @@ DEFAULT_STATE_DIR = Path.home() / ".ringer"
 # the cap is a runaway BACKSTOP, not rationing, and a breach must never be silent.
 FEEDER_BASE = os.environ.get("RINGER_FEEDER_BASE", "http://localhost:3001")
 DEFAULT_BUDGET_TOKENS = int(os.environ.get("RINGER_RUN_BUDGET_TOKENS", "500000"))
+# Unattended auto-runs get a TIGHTER default ceiling than interactive runs — an
+# always-on loop is unwatched, so limit blast radius if a run slips all guards
+# (feeder ask, 2026-07-15). Still just a backstop atop the step cap + breaker.
+AUTORUN_BUDGET_TOKENS = int(os.environ.get("RINGER_AUTORUN_BUDGET_TOKENS", "250000"))
+
+# Wake/stop signalling for the always-on runner thread. /engine/wake sets _WAKE
+# for an immediate claim; the daemon's shutdown sets _STOP.
+_WAKE = threading.Event()
+_STOP = threading.Event()
+
+
+def wake() -> None:
+    """Poke the always-on runner to claim now (called by /engine/wake)."""
+    _WAKE.set()
 
 
 def _feeder_json(method: str, path: str, body: dict | None = None) -> Any:
@@ -217,13 +232,38 @@ def run_once(store: Store, *, agent_code: str = "ringer", identity: str = "ringe
 
 
 def serve(store: Store, *, agent_code: str = "ringer", poll_interval: float = 120.0,
+          budget_tokens: int | None = AUTORUN_BUDGET_TOKENS, max_passes: int | None = None,
           **kwargs: Any) -> None:
-    """Slow-poll backstop loop (the wake receiver drives faster claims). One task
-    per pass, exactly as blueprint §4 prescribes."""
-    while True:
+    """One-task-per-pass consumer loop (blueprint §4). Drains eagerly while there
+    is work; when idle, waits up to poll_interval OR until wake()d (the /engine/wake
+    receiver drives sub-second claims; the poll is the backstop). Stops on stop().
+    max_passes bounds the loop for tests."""
+    _STOP.clear()
+    passes = 0
+    while not _STOP.is_set():
         try:
-            result = run_once(store, agent_code=agent_code, **kwargs)
+            result = run_once(store, agent_code=agent_code, budget_tokens=budget_tokens, **kwargs)
         except Exception:  # a bad pass must never kill the loop
             result = None
-        if result is None:
-            time.sleep(poll_interval)
+        passes += 1
+        if max_passes is not None and passes >= max_passes:
+            return
+        if result is None:  # queue drained → idle until woken or the poll fires
+            _WAKE.wait(timeout=poll_interval)
+            _WAKE.clear()
+
+
+def start_background(store: Store, **kwargs: Any) -> threading.Thread:
+    """Run serve() on a daemon thread (the FastAPI lifespan calls this when
+    RINGER_ENGINE_AUTORUN=1). Returns the thread."""
+    _STOP.clear()
+    thread = threading.Thread(target=serve, args=(store,), kwargs=kwargs,
+                              name="ringer-engine-runner", daemon=True)
+    thread.start()
+    return thread
+
+
+def stop() -> None:
+    """Signal the runner loop to exit after its current pass (daemon shutdown)."""
+    _STOP.set()
+    _WAKE.set()

@@ -181,7 +181,9 @@ def upsert_ledger(agent_code: str, body: LedgerIn):
 @router.post("/engine/wake")
 def wake(body: WakeIn):
     """Agent→Ringer local wake: an agent that just filed a job pokes this so the
-    runner claims within ~1s instead of waiting for the slow-poll backstop. P2
-    acknowledges the wake; the runner loop consumes it at P4."""
+    always-on runner claims within ~1s instead of waiting for the slow-poll
+    backstop. No-op (but still 200) when the runner isn't running."""
+    from . import runner
+    runner.wake()
     return JSONResponse({"ok": True, "woke": True,
                          "agent_code": body.agent_code, "task_id": body.task_id})
