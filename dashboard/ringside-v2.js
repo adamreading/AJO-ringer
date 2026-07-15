@@ -89,7 +89,19 @@
 
   /** Stable run identifier. */
   function runId(run, i) {
-    return run.runId || run.id || 'run-' + i;
+    return run.run_id || run.runId || run.id || 'run-' + i;
+  }
+
+  /** The model that ACTUALLY served this task (feeder-enriched), else the routed slug. */
+  function servedModel(task) {
+    var fed = task.feeder || {};
+    var served = fed.served;
+    if (Array.isArray(served) && served.length) {
+      return served.map(function (s) {
+        return (s.platform ? s.platform + '/' : '') + (s.model_id || '');
+      }).join(' → ');
+    }
+    return task.model || '';
   }
 
   /** Stable task key. */
@@ -126,6 +138,9 @@
 
   /** Strip ANSI escape codes from worker log text. */
   function stripAnsi(s) {
+    if (Array.isArray(s)) s = s.join('\n');
+    else if (s == null) s = '';
+    else if (typeof s !== 'string') s = String(s);
     return s
       .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
       .replace(/\x1b\[[0-9;]{1,6}m/g, '');
@@ -158,16 +173,17 @@
 
       return {
         id: id,
-        label: run.label || run.name || id,
+        label: run.run_name || run.label || run.name || id,
+        runName: run.run_name || run.label || run.name || id,
         tasks: tasks,
         pass: pass,
         fail: fail,
         done: done,
         total: tasks.length,
         tokens: tokens,
-        startedAt: parseTime(run.startedAt || run.started),
-        finishedAt: parseTime(run.finishedAt || run.finished),
-        isLive: !!state.active[id],
+        startedAt: parseTime(run.started_at || run.startedAt || run.started),
+        finishedAt: parseTime(run.finished_at || run.finishedAt),
+        isLive: run.state === 'live' || !!state.active[id],
         raw: run,
       };
     });
@@ -244,12 +260,18 @@
       var task = run.tasks.find(function (t, ti) { return taskKey(t, ti) === tkey; });
       if (!task) return;
       var kind = taskKind(task);
-      if (kind !== 'working' && kind !== 'retry') return;
+      var running = (kind === 'working' || kind === 'retry');
+      // running: poll the live log each tick; finished: fetch the full log ONCE.
+      // If the file was reaped (/tmp), the fetch 404s and we keep the seeded tail.
+      if (!running && state.expandedWorkers.get(compositeKey) === 'full') return;
 
       fetch(apiUrl('/logs/' + encodeURIComponent(rid) + '/' + encodeURIComponent(tkey)), { cache: 'no-store' })
-        .then(function (r) { return r.text(); })
+        .then(function (r) { return r.ok ? r.text() : ''; })
         .then(function (text) {
-          updateWorkerLog(compositeKey, stripAnsi(text));
+          if (text) {
+            updateWorkerLog(compositeKey, stripAnsi(text));
+            if (!running) state.expandedWorkers.set(compositeKey, 'full');
+          }
         })
         .catch(function () {});
     });
@@ -605,8 +627,41 @@
       ? state.runs.filter(function (r) { return r.id === state.selectedRun; })
       : state.runs;
 
+    // Group runs into JOBS (by run_name). A job's runs are its rounds — one job,
+    // one artifact, rounds accumulate — instead of a flat list of every run.
+    var jobs = [];
+    var byName = {};
     visible.forEach(function (run) {
-      wrapper.appendChild(renderRunPanel(run));
+      var name = run.runName || run.label;
+      if (!byName[name]) { byName[name] = { name: name, runs: [] }; jobs.push(byName[name]); }
+      byName[name].runs.push(run);
+    });
+    jobs.forEach(function (j) {
+      j.runs.sort(function (a, b) { return (a.startedAt || 0) - (b.startedAt || 0); }); // round 1..N
+      j.isLive = j.runs.some(function (r) { return r.isLive; });
+      j.latest = j.runs[j.runs.length - 1];
+    });
+    jobs.sort(function (a, b) {
+      if (a.isLive !== b.isLive) return a.isLive ? -1 : 1;
+      return (b.latest.startedAt || 0) - (a.latest.startedAt || 0);
+    });
+
+    jobs.forEach(function (job) {
+      var group = el('div', { className: 'job-group', attrs: { 'data-key': 'job-' + job.name } });
+      var header = el('div', { className: 'job-header' });
+      header.appendChild(el('span', { className: 'job-name', text: job.name }));
+      header.appendChild(el('span', {
+        className: 'job-meta',
+        text: job.runs.length + (job.runs.length === 1 ? ' round' : ' rounds'),
+      }));
+      if (job.isLive) header.appendChild(el('span', { className: 'job-live', text: 'LIVE' }));
+      group.appendChild(header);
+      // newest round on top, labelled Round N (N = chronological round number)
+      job.runs.slice().reverse().forEach(function (run, idx) {
+        run.roundLabel = 'Round ' + (job.runs.length - idx);
+        group.appendChild(renderRunPanel(run));
+      });
+      wrapper.appendChild(group);
     });
 
     return wrapper;
@@ -621,7 +676,7 @@
 
     // Header
     var header = el('div', { className: 'run-header' });
-    header.appendChild(el('span', { className: 'run-label', text: run.label }));
+    header.appendChild(el('span', { className: 'run-label', text: run.roundLabel || run.label }));
     header.appendChild(el('span', {
       className: 'run-status',
       text: run.isLive ? 'LIVE' : 'DONE',
@@ -707,11 +762,20 @@
       detail.appendChild(specSection);
     }
 
-    // Live log stream
+    // Served model — the model that ACTUALLY served this task (feeder-enriched),
+    // not the routed slug (feeder/auto/*).
+    var sm = servedModel(task);
+    if (sm) {
+      detail.appendChild(el('div', { className: 'worker-model', text: 'Model: ' + sm }));
+    }
+
+    // Live log stream — seed from the embedded tail so it's never blank. Worker.log
+    // files live in /tmp and can be reaped; the run JSON always carries log_tail_full.
+    var seed = stripAnsi(task.log_tail_full || task.log_tail || '');
     var logPre = el('pre', {
       className: 'worker-log',
       attrs: { 'data-log-key': compositeKey },
-      text: 'Loading log...',
+      text: seed || 'Loading log...',
     });
     detail.appendChild(logPre);
 

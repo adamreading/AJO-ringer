@@ -1588,3 +1588,48 @@ button {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ── Job grouping (runs grouped into jobs; runs = rounds) ─────────────────── */
+.job-group {
+  margin-bottom: 24px;
+  padding-left: 12px;
+  border-left: 2px solid var(--hairline);
+}
+.job-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 2px 0 10px;
+  margin-bottom: 10px;
+}
+.job-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+.job-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.job-live {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  border: 1px solid var(--accent-glow);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.job-group .run-panel { margin-bottom: 10px; }
+
+/* Served model line in the expanded worker detail */
+.worker-model {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  margin: 2px 0 8px;
+}
