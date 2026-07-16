@@ -21,3 +21,9 @@ CLAUDE.md
 
 # Operator PII scan terms (never commit — real PII)
 .pii-scan-terms.txt
+
+# --- coord (twinning) local state — never commit ---
+scripts/coord/coord.config.json
+scripts/coord/events.jsonl
+scripts/coord/events.lock
+.claude/settings.json.bak

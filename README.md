@@ -50,6 +50,120 @@ curl -s localhost:8700/engine/health           # {ok:true, db_ready:true, ...}
 The daemon serves the Ringside wall **and** the agent-API on one port. (For just the CLI —
 `./ringer.py run manifest.json` — you don't need the daemon or the DB; see [Quickstart](#quickstart).)
 
+## Security: the pre-push gate
+
+This repo ships a **pre-push gate** — a git hook that scans every push for secrets
+(API keys, tokens, private keys, `password=`/`apiKey=` literals) and for your
+personal PII (email, name, employer, machine username). If it finds anything, it
+**blocks the push** (fail-closed). It's the durable guard against ever leaking a
+secret or personal detail into git history.
+
+**It is not a running service.** It's a checkpoint git invokes *at the moment of
+`git push`*, then exits — nothing runs between pushes, nothing to keep alive, and a
+reboot changes nothing (the setting lives in `.git/config` on disk).
+
+### Activate it after cloning (one command, or the setup script)
+
+Git ships hooks **dormant** on clone (a security feature — cloning must never run
+code). Turn the gate on with the setup script:
+
+```bash
+python3 scripts/setup-security.py
+```
+
+It (1) arms the hook (`git config core.hooksPath scripts/hooks`) and (2) seeds your
+PII terms interactively. Prefer to do it by hand? The two steps are:
+
+```bash
+git config core.hooksPath scripts/hooks                 # arm the gate (per clone)
+$EDITOR ~/.config/ringer/pii-scan-terms.txt             # seed your terms (see below)
+```
+
+### The PII terms file is shared, seed it once
+
+Both ringer and feeder read the **same** file, resolved in this order:
+
+1. `$RINGER_PII_TERMS` (env override, optional)
+2. `~/.config/ringer/pii-scan-terms.txt` ← **the shared default**
+3. `./.pii-scan-terms.txt` (repo-local fallback)
+
+So on a machine with several gate repos you seed **one** file and **all** of them
+use it — no syncing. Format: one literal term per line, `#` comments allowed,
+case-insensitive substring match. It is never committed (it holds your personal
+data); keep it at `chmod 600`. `setup-security.py` creates it for you.
+
+**If the terms file is empty/missing, the gate fail-closes and blocks every push**
+until you seed at least your email + username — it refuses to give false "clean"
+assurance. (Secret patterns like API keys are caught regardless; only PII matching
+needs the terms.)
+
+### False positives
+
+A real doc example or i18n label can look like a secret. Two escape hatches:
+rewrite the value as an obvious placeholder (`your-token-here`, `...`), or add the
+inline marker `# pii-scan: allow` on that line. Never exempt by file path — a real
+key in an "allowed" file would then leak.
+
+## Twinning: coordinate multiple clones/agents
+
+If you run more than one of these repos (or the same repo on two machines) with an
+AI agent in each, they can **coordinate over a shared board** — a server-less,
+append-only task + message log. No daemon, no network service; just a shared folder.
+
+### How they talk
+
+Every agent points at the **same board directory**. Appends from different agents
+never clobber each other (append-only), so the board is literally a shared folder.
+Board directory resolves in order:
+
+1. `$COORD_BOARD_DIR` (explicit; use this for cross-machine)
+2. `boardDir` in `scripts/coord/coord.config.json` (written by the setup script)
+3. `${XDG_DATA_HOME:-~/.local/share}/coord/board` (portable default)
+
+- **Same machine** (several repos, one user): the default already resolves to one
+  shared path — they see each other with **zero config**.
+- **Different machines / OSes**: give every clone the **same shared path** — a
+  shared mount (`/mnt/c`, NFS) or a synced folder (Syncthing/Dropbox/iCloud). The
+  board is plain JSONL, safe to sync.
+
+Each agent's identity defaults to `<repo-basename>@<host>` (e.g. `ringer@AJO`,
+`feeder@AJO`), so many clones on one box stay distinct. Override with `$COORD_AGENT`.
+
+### Set it up (once per clone)
+
+```bash
+python3 scripts/setup-coord.py
+```
+
+It picks the board location, sets this clone's agent name, writes
+`scripts/coord/coord.config.json`, and offers to install a per-turn **peer-watch
+hook** (a Claude Code `UserPromptSubmit` hook that prints the board each turn, so
+each agent sees peers' latest state at its turn boundary).
+
+### Use it
+
+```bash
+node scripts/coord/coord.js whoami                       # my identity + board dir
+node scripts/coord/coord.js show                         # the board
+node scripts/coord/coord.js add "task title"             # -> prints an id (t1, ...)
+node scripts/coord/coord.js claim t1                     # take ownership
+node scripts/coord/coord.js status t1 wip "half done"
+node scripts/coord/coord.js msg "handing you the client side"
+```
+
+Working rule: `show` at the start of a session, `claim` before you touch a task's
+files (that's how agents avoid stepping on each other), `msg` for anything that
+isn't a task. To add another clone, run `setup-coord.py` there with the **same
+board dir**.
+
+### Companion repo & twinning (feeder <-> ringer)
+
+This repo has a companion: feeder (adamreading/Agent-LLM-Feeder, the routing proxy) and ringer (adamreading/AJO-ringer, the verified-swarm orchestrator) are built to run together - an agent in each, coordinating over one shared board. Whichever you cloned first, pull in the other and twin them:
+
+1. Clone the sibling: feeder = git clone https://github.com/adamreading/Agent-LLM-Feeder ; ringer = git clone https://github.com/adamreading/AJO-ringer
+2. Run `python3 scripts/setup-coord.py` in BOTH. Same machine: accept the default board dir in each -> auto-twin (both resolve to ~/.local/share/coord/board). Different machines: same $COORD_BOARD_DIR (shared mount / synced folder).
+3. Confirm: `node scripts/coord/coord.js show` in either lists both agents (feeder@host, ringer@host).
+
 ## Connect an agent to the swarm
 
 There are **two ways in**, over `http://localhost:8700` (all JSON). Most agents want the first.
