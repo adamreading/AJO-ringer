@@ -81,6 +81,30 @@
     return (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
   }
 
+  /** Comma-group an integer (31591 -> "31,591"), fail-safe for non-numbers. */
+  function withCommas(n) {
+    return Math.round(numberOrZero(n)).toLocaleString('en-US');
+  }
+
+  /**
+   * Sum the per-round feeder token totals across every round of a job into one
+   * job-level burn { total, input, output, calls }. Returns null if no round
+   * has been enriched yet (so the header shows nothing rather than a bare "0").
+   */
+  function jobTokenBurn(job) {
+    var total = 0, input = 0, output = 0, calls = 0, seen = false;
+    (job.runs || []).forEach(function (run) {
+      var ft = run.feederTotals;
+      if (!ft || typeof ft !== 'object') return;
+      seen = true;
+      total += numberOrZero(ft.total_tokens);
+      input += numberOrZero(ft.input_tokens);
+      output += numberOrZero(ft.output_tokens);
+      calls += numberOrZero(ft.calls);
+    });
+    return seen ? { total: total, input: input, output: output, calls: calls } : null;
+  }
+
   /** Relative time-ago string from epoch-ms or ISO string. */
   function relativeAgo(v) {
     const ms = parseTime(v);
@@ -209,6 +233,9 @@
         startedAt: parseTime(run.started_at || run.startedAt || run.started),
         finishedAt: parseTime(run.finished_at || run.finishedAt),
         isLive: run.state === 'live' || !!state.active[id],
+        // Per-run token burn, written into the run JSON post-run by
+        // scripts/feeder_enrich.py (state.feeder_totals). Null until enriched.
+        feederTotals: run.feeder_totals || null,
         raw: run,
       };
     });
@@ -896,6 +923,21 @@
         text: job.runs.length + (job.runs.length === 1 ? ' round' : ' rounds'),
       }));
       if (job.isLive) header.appendChild(el('span', { className: 'job-live', text: 'LIVE' }));
+      // Token burn for the whole job (summed across rounds), from feeder_enrich.
+      var burn = jobTokenBurn(job);
+      if (burn) {
+        var tokEl = el('span', { className: 'job-tokens' });
+        tokEl.appendChild(el('span', {
+          className: 'job-tokens-total',
+          text: withCommas(burn.total) + ' tok',
+        }));
+        tokEl.appendChild(el('span', {
+          className: 'job-tokens-split',
+          text: withCommas(burn.input) + ' in / ' + withCommas(burn.output) + ' out'
+            + (burn.calls ? ' · ' + withCommas(burn.calls) + ' calls' : ''),
+        }));
+        header.appendChild(tokEl);
+      }
       // Expand / collapse EVERY agent window in this job at once (all rounds).
       var jobKeys = [];
       job.runs.forEach(function (run) {

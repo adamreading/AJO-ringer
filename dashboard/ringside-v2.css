@@ -1627,6 +1627,21 @@ button {
   border-radius: 999px;
   padding: 1px 8px;
 }
+.job-tokens {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.job-tokens-total {
+  color: var(--ink);
+  font-weight: 700;
+}
+.job-tokens-split {
+  color: var(--muted);
+}
 .job-toggle-all {
   margin-left: auto;
   font-family: var(--font-mono);
