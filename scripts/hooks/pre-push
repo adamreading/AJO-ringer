@@ -15,6 +15,16 @@ SCAN="$REPO_ROOT/scripts/pii_secret_scan.py"
 ZERO=0000000000000000000000000000000000000000
 rc=0
 
+# Fail-CLOSED if the operator PII terms are not seeded — an empty/missing terms
+# file would let the PII scan silently pass everything (a security tool must not
+# give false assurance). Secret rules run regardless; PII detection needs terms.
+if ! python3 "$SCAN" terms-status >/dev/null 2>&1; then
+    echo "PUSH BLOCKED: PII terms not seeded (~/.config/ringer/pii-scan-terms.txt empty/missing)." >&2
+    echo "  The gate cannot verify PII, so it refuses rather than pass silently." >&2
+    echo "  Seed at least your personal email + machine username, then re-push." >&2
+    exit 1
+fi
+
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -z "${local_sha:-}" ] && continue
     [ "$local_sha" = "$ZERO" ] && continue          # branch deletion — nothing to scan

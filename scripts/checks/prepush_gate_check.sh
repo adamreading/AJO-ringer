@@ -59,4 +59,10 @@ if ! RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py scan-diff 
 fi
 echo "  ok: placeholder/env-ref not flagged"
 
-echo "PASS: pre-push security gate works (catches secrets + PII + private-email; no FP on clean tree/placeholders)"
+# 6. FAIL-CLOSED when the operator terms file is empty/missing (no silent PII pass)
+if RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py terms-status 2>/dev/null; then
+    fail "terms-status must FAIL-CLOSED (non-zero) when no terms file is present"
+fi
+echo "  ok: fail-closed on missing/empty terms file"
+
+echo "PASS: pre-push security gate works (catches secrets + PII + private-email; fail-closed on unseeded terms; no FP on clean tree/placeholders)"

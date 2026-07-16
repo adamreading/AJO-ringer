@@ -76,11 +76,17 @@ def _sh(*args: str) -> str:
 
 
 def load_terms() -> list[str]:
-    candidates = [
-        os.environ.get("RINGER_PII_TERMS"),
-        os.path.expanduser("~/.config/ringer/pii-scan-terms.txt"),
-        ".pii-scan-terms.txt",
-    ]
+    # An explicitly-set RINGER_PII_TERMS is AUTHORITATIVE (no fallback) — so a
+    # test/CI can force "no terms" with a nonexistent path, and an operator can
+    # point at a specific file. Unset → search the default locations.
+    env = os.environ.get("RINGER_PII_TERMS")
+    if env:
+        candidates = [env]
+    else:
+        candidates = [
+            os.path.expanduser("~/.config/ringer/pii-scan-terms.txt"),
+            ".pii-scan-terms.txt",
+        ]
     for path in candidates:
         if path and os.path.isfile(path):
             out = []
@@ -180,6 +186,17 @@ def main(argv: list[str]) -> int:
         return scan_diff(rest[0], rest[1])
     if cmd == "scan-emails":
         return scan_emails(rest)
+    if cmd == "terms-status":
+        # Fail-CLOSED signal for the hook: an empty/missing terms file means the
+        # PII scan would silently pass everything (OB, 2026-07-16). Exit 3 so the
+        # gate refuses rather than giving false assurance. (scan-tree/secret rules
+        # still work without terms — only PII detection needs them.)
+        if not TERMS:
+            print("no PII terms loaded — seed ~/.config/ringer/pii-scan-terms.txt "
+                  "(gate fails closed without it)", file=sys.stderr)
+            return 3
+        print(f"{len(TERMS)} PII term(s) loaded")
+        return 0
     print(f"usage error: unknown/short command {cmd!r}", file=sys.stderr)
     return 2
 
