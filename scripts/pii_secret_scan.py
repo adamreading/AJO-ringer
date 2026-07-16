@@ -64,16 +64,19 @@ _ASSIGN = re.compile(
     (?P<q>['"])(?P<val>[^'"]{12,})(?P=q)
     """
 )
-_PLACEHOLDER = re.compile(
-    r"(?i)(os\.environ|getenv|process\.env|<[^>]+>|\$\{|\byour[_-]|example|"
-    r"placeholder|changeme|xxxx|redacted|dummy|sample)"
-)
-# The VALUE itself looks like a test/dummy token (feeder FP class 2026-07-16:
-# `const token = 'lunk-test-token'`). Value-based (not test-dir-based) on purpose:
-# a REAL high-entropy key hardcoded in a test file must still fire.
-_TESTVAL = re.compile(
-    r"(?i)(^|[-_.: ])(test|fake|dummy|mock|stub|sample|example|placeholder|"
-    r"changeme|foo|bar|baz|lorem|noop)([-_.: ]|$)"
+# Distinctive STRUCTURAL markers — safe to match anywhere in a value (they can't
+# occur inside a real high-entropy token): env refs, command subst, <...>, ellipsis.
+_PH_STRUCT = re.compile(r"(?i)(os\.environ|getenv|process\.env|<[^>]+>|\$\{|\$\(|\.\.\.)")
+# Dictionary placeholder / test words — matched ONLY as separator-delimited tokens
+# (feeder FP `...-test-token`, OB FPs `xoxb-your-...-here`, `CHANGE-ME-...`). The
+# separator anchoring is load-bearing: it stops `example`/`sample` from exempting a
+# real blob like AKIA...EXAMPLE... that merely contains the letters (a real
+# high-entropy key in a README / .example / test file must still fire).
+_PH_WORD = re.compile(
+    r"(?i)(?:^|[^A-Za-z0-9])"
+    r"(your|example|placeholder|change[-_ ]?me|changeme|x{4,}|redacted|dummy|sample|"
+    r"paste|invalid|here|test|fake|mock|stub|foo|bar|baz|lorem|noop)"
+    r"(?:[^A-Za-z0-9]|$)"
 )
 # Escape hatch for the rare legitimate flag: a line carrying this marker is skipped.
 _ALLOW_MARKER = "pii-scan: allow"
@@ -121,6 +124,15 @@ def _excluded(path: str) -> bool:
     return any(path == p or path.startswith(p) for p in EXCLUDE_PREFIXES)
 
 
+def _benign(value: str) -> bool:
+    """True when a matched value is clearly a placeholder / test / doc token, not
+    a real secret. VALUE-based (never path-based) so a real high-entropy key in a
+    README, .example, or test file still fires. Applied to BOTH the prefix
+    SECRET_RULES and the generic assignment rule (OB, 2026-07-16: the prefix rules
+    previously skipped the guard, so `xoxb-your-slack-bot-token-here` fired)."""
+    return bool(_PH_STRUCT.search(value) or _PH_WORD.search(value))
+
+
 def scan_text(path: str, lineno: int, line: str, findings: list[str]) -> None:
     """Append a finding line for every rule/term that hits `line`."""
     if _ALLOW_MARKER in line:            # explicit per-line opt-out
@@ -132,10 +144,10 @@ def scan_text(path: str, lineno: int, line: str, findings: list[str]) -> None:
             findings.append(f"{path}:{lineno}: [operator-pii] matched a private term")
     for name, rx in SECRET_RULES:
         m = rx.search(line)
-        if m:
+        if m and not _benign(m.group(0)):
             findings.append(f"{path}:{lineno}: [{name}] {_mask(m.group(0))}")
     a = _ASSIGN.search(line)
-    if a and not _PLACEHOLDER.search(line) and not _TESTVAL.search(a.group("val")):
+    if a and not _benign(a.group("val")):
         findings.append(f"{path}:{lineno}: [hardcoded-secret-assignment] {_mask(a.group('val'))}")
 
 

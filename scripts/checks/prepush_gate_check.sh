@@ -26,7 +26,7 @@ cp "$SCAN" scripts/pii_secret_scan.py
 BASE=$(git rev-parse HEAD)
 
 # 2. planted secret is caught (fake AWS-style key)
-printf 'aws_key = "AKIA%s"\n' "IOSFODNN7EXAMPLE1" > leak.txt   # 16 upper/num after AKIA
+printf 'aws_key = "AKIA%s"\n' "2X7QF9MZ4KP1LR8N" > leak.txt   # 16 upper/num after AKIA (no dict word)
 git add leak.txt; git commit -qm leak
 if RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py scan-diff "$BASE" HEAD; then
     fail "planted secret NOT caught by scan-diff"
@@ -82,6 +82,31 @@ if ! RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py scan-diff 
     fail "allow-marker did not suppress the finding"
 fi
 echo "  ok: inline allow-marker works"
+
+# 5e. real-world placeholder/doc/.example FP classes (OB adoption check) — all PASS.
+#     Prefix rules (slack/openai) + hyphenated placeholders + command-subst + '...'/here.
+cat > docs_placeholders.txt <<'EOF'
+postgres-password: "CHANGE-ME-postgres-password"
+SLACK_BOT_TOKEN=xoxb-your-slack-bot-token-here
+TELEGRAM_BOT_TOKEN="123456789:ABC..."
+secret="paste_your_secret_here"
+apikey: "invalid-anon-smoke"
+jwt_secret="$(gen_secret_hex 32)"
+API_KEY="sk-or-v1-your-key-here..."
+EOF
+git add docs_placeholders.txt; git commit -qm docsph
+if ! RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py scan-diff HEAD~1 HEAD; then
+    fail "doc/placeholder/example FP class wrongly flagged (prefix-rule or hyphen guard missing)"
+fi
+echo "  ok: doc/placeholder/.example values not flagged"
+
+# 5f. a REAL 32-char entropy secret value STILL fails (didn't over-exempt docs)
+printf 'api_key = "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"\n' > realentropy.py
+git add realentropy.py; git commit -qm realentropy
+if RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py scan-diff HEAD~1 HEAD; then
+    fail "real 32-char entropy secret NOT caught"
+fi
+echo "  ok: real 32-char entropy secret still caught"
 
 # 6. FAIL-CLOSED when the operator terms file is empty/missing (no silent PII pass)
 if RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py terms-status 2>/dev/null; then
