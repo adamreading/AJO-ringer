@@ -293,7 +293,7 @@ Ringer gets its OWN dedicated Claude ("Ringer-Claude") = a Claude Code session w
 same WSL `ajo` user, distinguished by working dir + `COORD_AGENT`. Proven by feeder-claude, which is
 also a WSL session identified only by `COORD_AGENT=feeder-claude` in its repo `.claude/settings.json`
 (`coord.js`: `process.env.COORD_AGENT || (win32?windows:wsl)`). No Supabase/networking — same machine,
-same shared `/mnt/c/.../Open Brain/.claude/coordination/events.jsonl` board.
+same shared `<COORD_REPO>/.claude/coordination/events.jsonl` board.
 - `~/ringer/.claude/settings.json` → `{"env":{"COORD_AGENT":"ringer-claude"}}`. The user-level coord
   hooks (already in `~/.claude`, shared) then show it the board each turn as `@ringer-claude`.
 - `~/ringer/CLAUDE.md` → identity, board protocol + peer-watch Monitor command (idle wake-ups), the
