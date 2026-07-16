@@ -143,10 +143,33 @@ def _scan_terminal_429(run: dict[str, Any]) -> str | None:
 _NOTIFY_STATES = ("done", "review", "failed", "needs_input")
 
 
-def _notify_requester(task: dict[str, Any], receipts: list[dict[str, Any]], store: Store) -> None:
+_ARTIFACTS_ROOT = os.path.realpath(os.path.expanduser("~/.ringer/artifacts"))
+
+
+def _valid_artifact(path: str | None) -> str | None:
+    """A caller-supplied artifact_path is honoured ONLY if it is an existing file
+    under ~/.ringer/artifacts — so the outbound wake can never point the consumer
+    (wsl's Discord bridge) at an arbitrary file on the box. Fail-open: anything
+    invalid -> None -> text-only delivery still works."""
+    if not path:
+        return None
+    try:
+        ap = os.path.realpath(os.path.expanduser(path))
+        if (ap == _ARTIFACTS_ROOT or ap.startswith(_ARTIFACTS_ROOT + os.sep)) and os.path.isfile(ap):
+            return ap
+    except Exception:  # noqa: BLE001 - defensive; never break the wake
+        pass
+    return None
+
+
+def _notify_requester(task: dict[str, Any], receipts: list[dict[str, Any]], store: Store,
+                      *, artifact_path: str | None = None) -> None:
     """Outbound wake-in (blueprint §7): POST the task's notify_agent's registered
     notify_url when the task reaches a state worth waking them for. FAIL-OPEN — a
-    missed wake never affects the task; the durable queue + polling are the backstop."""
+    missed wake never affects the task; the durable queue + polling are the backstop.
+    When artifact_path (validated, under the artifacts dir) is given it rides in the
+    payload so the consumer can attach it — Adam's deliverable policy (2026-07-16):
+    default inline text; artifact only for visual / long structured reports."""
     notify_agent = task.get("notify_agent")
     status = task.get("status")
     if not notify_agent or status not in _NOTIFY_STATES:
@@ -156,11 +179,15 @@ def _notify_requester(task: dict[str, Any], receipts: list[dict[str, Any]], stor
     if not url:
         return
     last = receipts[-1] if receipts else {}
-    body = json.dumps({
+    payload = {
         "task_id": task["id"], "run_id": str(task["id"]), "status": status,
         "notify_agent": notify_agent,
         "receipt_type": last.get("receipt_type"), "receipt_body": last.get("body"),
-    }).encode("utf-8")
+    }
+    ap = _valid_artifact(artifact_path)
+    if ap:
+        payload["artifact_path"] = ap
+    body = json.dumps(payload).encode("utf-8")
     try:
         req = urllib.request.Request(url, data=body, method="POST",
                                      headers={"Content-Type": "application/json"})

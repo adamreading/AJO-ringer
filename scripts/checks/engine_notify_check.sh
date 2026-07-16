@@ -89,6 +89,41 @@ try:
     hit = [x for x in received if x.get("task_id") == tb["id"] and x.get("status") == "done"]
     check(len(hit) == 1, f"(d) orchestrator PATCH->terminal must fire ONE wake, got {len(hit)}")
 
+    # (e) artifact_path rides the wake ONLY when it's a real file under ~/.ringer/artifacts
+    #     (Adam's deliverable policy) — an out-of-dir path is rejected by the guard.
+    art_root = Path(runner._ARTIFACTS_ROOT); art_root.mkdir(parents=True, exist_ok=True)
+    good = art_root / f"notify_check_{os.getpid()}.html"
+    good.write_text("<h1>deliverable</h1>", encoding="utf-8")
+    bad = Path("/tmp") / f"notify_check_evil_{os.getpid()}.txt"
+    bad.write_text("nope", encoding="utf-8")
+    try:
+        received.clear()
+        te = store.file_task(agent_code="ringer", title="brief+artifact", body="q",
+                             task_kind="brief", notify_agent="lunk")
+        with TestClient(_app) as client:
+            client.patch(f"/agent-tasks/{te['id']}", json={
+                "agent_code": "ringer-claude", "status": "done", "receipt_type": "DONE",
+                "receipt_body": "answer + artifact", "artifact_path": str(good)})
+        time.sleep(0.3)
+        he = [x for x in received if x.get("task_id") == te["id"]]
+        want = os.path.realpath(str(good))
+        check(len(he) == 1 and he[0].get("artifact_path") == want,
+              f"(e) valid artifact_path must ride the wake, got {he and he[0].get('artifact_path')!r}")
+
+        received.clear()
+        tf = store.file_task(agent_code="ringer", title="brief+evil", body="q",
+                             task_kind="brief", notify_agent="lunk")
+        with TestClient(_app) as client:
+            client.patch(f"/agent-tasks/{tf['id']}", json={
+                "agent_code": "ringer-claude", "status": "done", "receipt_type": "DONE",
+                "receipt_body": "answer", "artifact_path": str(bad)})
+        time.sleep(0.3)
+        hf = [x for x in received if x.get("task_id") == tf["id"]]
+        check(len(hf) == 1 and "artifact_path" not in hf[0],
+              f"(e) out-of-dir artifact_path must be rejected, got {hf and hf[0].get('artifact_path')!r}")
+    finally:
+        good.unlink(missing_ok=True); bad.unlink(missing_ok=True)
+
 finally:
     srv.shutdown()
     try:

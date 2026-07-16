@@ -63,6 +63,7 @@ class PatchIn(BaseModel):
     priority: int | None = None
     human_authorized: bool = False
     consequential: bool = False
+    artifact_path: str | None = None  # optional deliverable to attach on terminal wake
 
 
 class ReceiptIn(BaseModel):
@@ -158,7 +159,7 @@ def patch_task(task_id: int, body: PatchIn):
     from . import runner
     if task and task.get("notify_agent") and task.get("status") in runner._NOTIFY_STATES:
         receipts = st.get_task(task_id).get("receipts") or []
-        runner._notify_requester(task, receipts, st)
+        runner._notify_requester(task, receipts, st, artifact_path=body.artifact_path)
     return task
 
 
