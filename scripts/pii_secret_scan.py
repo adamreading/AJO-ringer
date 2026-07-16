@@ -55,17 +55,28 @@ SECRET_RULES = [
 ]
 
 # Generic "secret = <literal value>" — excludes env refs / placeholders.
+# Absorb identifier prefixes so db_password / apiKey / my_secret / authToken all
+# match (a leading \b on the bare word missed underscore-prefixed names).
 _ASSIGN = re.compile(
     r"""(?ix)
-    \b(pass(?:word|wd)?|secret|token|api[_-]?key)\b
+    \b[a-z0-9_]*(?:password|passwd|secret|token|api[_-]?key|apikey|access[_-]?key)
     \s*[:=]\s*
-    (['"])(?P<val>[^'"]{12,})\2
+    (?P<q>['"])(?P<val>[^'"]{12,})(?P=q)
     """
 )
 _PLACEHOLDER = re.compile(
     r"(?i)(os\.environ|getenv|process\.env|<[^>]+>|\$\{|\byour[_-]|example|"
     r"placeholder|changeme|xxxx|redacted|dummy|sample)"
 )
+# The VALUE itself looks like a test/dummy token (feeder FP class 2026-07-16:
+# `const token = 'lunk-test-token'`). Value-based (not test-dir-based) on purpose:
+# a REAL high-entropy key hardcoded in a test file must still fire.
+_TESTVAL = re.compile(
+    r"(?i)(^|[-_.: ])(test|fake|dummy|mock|stub|sample|example|placeholder|"
+    r"changeme|foo|bar|baz|lorem|noop)([-_.: ]|$)"
+)
+# Escape hatch for the rare legitimate flag: a line carrying this marker is skipped.
+_ALLOW_MARKER = "pii-scan: allow"
 
 
 def _sh(*args: str) -> str:
@@ -112,6 +123,8 @@ def _excluded(path: str) -> bool:
 
 def scan_text(path: str, lineno: int, line: str, findings: list[str]) -> None:
     """Append a finding line for every rule/term that hits `line`."""
+    if _ALLOW_MARKER in line:            # explicit per-line opt-out
+        return
     low = line.lower()
     for term in TERMS:
         if term in low:
@@ -122,7 +135,7 @@ def scan_text(path: str, lineno: int, line: str, findings: list[str]) -> None:
         if m:
             findings.append(f"{path}:{lineno}: [{name}] {_mask(m.group(0))}")
     a = _ASSIGN.search(line)
-    if a and not _PLACEHOLDER.search(line):
+    if a and not _PLACEHOLDER.search(line) and not _TESTVAL.search(a.group("val")):
         findings.append(f"{path}:{lineno}: [hardcoded-secret-assignment] {_mask(a.group('val'))}")
 
 

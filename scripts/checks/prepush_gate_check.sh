@@ -59,6 +59,30 @@ if ! RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py scan-diff 
 fi
 echo "  ok: placeholder/env-ref not flagged"
 
+# 5b. TEST/DUMMY values are NOT flagged (feeder FP class: `const token = 'lunk-test-token'`)
+{ printf "const token = 'lunk-test-token'\n"; printf 'api_key = "fake-key-for-tests"\n'; } > testvals.js
+git add testvals.js; git commit -qm testvals
+if ! RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py scan-diff HEAD~1 HEAD; then
+    fail "test/dummy token values wrongly flagged (feeder FP class not fixed)"
+fi
+echo "  ok: test/dummy token values not flagged"
+
+# 5c. a REAL high-entropy hardcoded secret STILL fires (didn't over-exempt)
+printf 'db_password = "Xk9mQ2vLp8wZr4tYn6Bc3Df"\n' > realsecret.py
+git add realsecret.py; git commit -qm realsecret
+if RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py scan-diff HEAD~1 HEAD; then
+    fail "real hardcoded secret NOT caught (over-exempted)"
+fi
+echo "  ok: real hardcoded secret still caught"
+
+# 5d. inline allow-marker suppresses a finding on that line
+printf 'db_password = "Xk9mQ2vLp8wZr4tYn6Bc3Df"  # pii-scan: allow\n' > allowed.py
+git add allowed.py; git commit -qm allowed
+if ! RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py scan-diff HEAD~1 HEAD; then
+    fail "allow-marker did not suppress the finding"
+fi
+echo "  ok: inline allow-marker works"
+
 # 6. FAIL-CLOSED when the operator terms file is empty/missing (no silent PII pass)
 if RINGER_PII_TERMS=/nonexistent python3 scripts/pii_secret_scan.py terms-status 2>/dev/null; then
     fail "terms-status must FAIL-CLOSED (non-zero) when no terms file is present"
