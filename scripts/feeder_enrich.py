@@ -48,6 +48,7 @@ def main():
             print(f"Error: cannot read fixture JSON: {e}")
             return 1
 
+    run_rows = []  # accumulate EVERY task's rows for the job-level token rollup
     for task in state["tasks"]:
         task_key = task.get("key")
         if not task_key:
@@ -113,7 +114,18 @@ def main():
             continue
 
         task["feeder"] = {"sessions": session_ids, **feeder_agg.aggregate_rows(all_rows)}
+        run_rows.extend(all_rows)
         print(f"task {task_key}: wrote feeder block with {len(all_rows)} requests")
+
+    # Job-level token burn (Adam's directive 2026-07-16): total across every task +
+    # per-model breakdown, so the UI shows it post-finish and the orchestrator quotes
+    # it in the Relay response. Input-dominated (agentic resend) — see token_totals.
+    if run_rows:
+        state["feeder_totals"] = feeder_agg.token_totals(run_rows)
+        ft = state["feeder_totals"]
+        print(f"run totals: {ft['total_tokens']} tokens "
+              f"({ft['input_tokens']} in / {ft['output_tokens']} out) across "
+              f"{ft['calls']} calls, {ft['models']} models")
 
     from datetime import datetime
     state["feeder_enriched_at"] = datetime.utcnow().isoformat() + "Z"

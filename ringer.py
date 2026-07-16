@@ -3543,6 +3543,35 @@ def render_feeder_strip(task_dict: dict[str, Any]) -> str:
     return strip
 
 
+def render_job_token_strip(state: dict[str, Any]) -> str:
+    # Job-level token burn for the whole run (Adam's directive 2026-07-16): total
+    # tokens + top per-model spenders, written post-run by scripts/feeder_enrich.py
+    # into state["feeder_totals"]. Optional + fail-open: absent/malformed -> "".
+    # Reuses .mono + inline style (no new CSS) to stay clear of render footguns.
+    ft = state.get("feeder_totals")
+    if not ft or not isinstance(ft, dict):
+        return ""
+    total = ft.get("total_tokens")
+    if not isinstance(total, int) or isinstance(total, bool):
+        return ""
+    def _int(v):
+        return v if isinstance(v, int) and not isinstance(v, bool) else 0
+    inp, out = _int(ft.get("input_tokens")), _int(ft.get("output_tokens"))
+    calls, models = _int(ft.get("calls")), _int(ft.get("models"))
+    tops = []
+    for m in (ft.get("by_model") or [])[:3]:
+        if not isinstance(m, dict):
+            continue
+        mid, mt, mc = m.get("model_id"), m.get("total_tokens"), m.get("calls")
+        if isinstance(mid, str) and isinstance(mt, int) and isinstance(mc, int):
+            tops.append(f"{html_escape(mid)} ({mt:,} &middot; {mc} call{'s' if mc != 1 else ''})")
+    head = (f"Token burn: {total:,} total ({inp:,} in / {out:,} out) &middot; "
+            f"{calls} calls &middot; {models} model{'s' if models != 1 else ''}")
+    tail = ("  &mdash;  top: " + "; ".join(tops)) if tops else ""
+    return (f'<p class="mono" style="opacity:.8;font-size:.82em;margin:.35em 0 0">'
+            f'{head}{tail}</p>')
+
+
 def render_work_group(
     task: dict[str, Any],
     *,
@@ -3840,6 +3869,7 @@ def render_final_report_html(
   {render_corner_header(state, live=False)}
   <h1 id="what-happened-heading" class="briefing">What happened — {briefing}</h1>
   {render_progress_bar(tasks, counts)}
+  {render_job_token_strip(state)}
   {render_work_section(state, renderer=renderer, page_path=page_path, force_wrappers=force_wrappers, primary=True)}
   <footer>
     <span class="mono">Finished {html_escape(local_time_label())}</span>

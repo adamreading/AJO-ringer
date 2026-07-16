@@ -64,6 +64,42 @@ def aggregate_rows(rows: list[dict]) -> dict:
     }
 
 
+def token_totals(rows: list[dict]) -> dict:
+    """Job/run-level token rollup across ALL request rows (every task, every model,
+    every attempt). Counts ALL rows, not just successes: input tokens are spent even
+    on failed/resent attempts, and that resend is the real burn (it is what the
+    step-cap guards against). by_model is sorted by total tokens, descending — the
+    biggest spender first. Separate from aggregate_rows() so the per-task block's
+    byte-compatible shape (guarded by phase4_enrich_check) is never disturbed."""
+    by_key: dict[tuple, dict] = {}
+    order: list[tuple] = []
+    ti = to = 0
+    for row in rows:
+        it = row.get("input_tokens") or 0
+        ot = row.get("output_tokens") or 0
+        ti += it
+        to += ot
+        key = (row.get("platform"), row.get("model_id"))
+        if key not in by_key:
+            by_key[key] = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+            order.append(key)
+        m = by_key[key]
+        m["calls"] += 1
+        m["input_tokens"] += it
+        m["output_tokens"] += ot
+    by_model = [
+        {"platform": k[0], "model_id": k[1], "calls": by_key[k]["calls"],
+         "input_tokens": by_key[k]["input_tokens"], "output_tokens": by_key[k]["output_tokens"],
+         "total_tokens": by_key[k]["input_tokens"] + by_key[k]["output_tokens"]}
+        for k in order
+    ]
+    by_model.sort(key=lambda m: m["total_tokens"], reverse=True)
+    return {
+        "input_tokens": ti, "output_tokens": to, "total_tokens": ti + to,
+        "calls": len(rows), "models": len(by_key), "by_model": by_model,
+    }
+
+
 def latest_served(rows: list[dict]) -> dict | None:
     """The row whose model actually served this session = the LAST success row.
     None when there are no success rows yet (still churning / pending)."""

@@ -1,0 +1,19 @@
+{
+  "run_name": "brief10-hello-pyramid",
+  "workdir": "/tmp/ringer-brief10",
+  "max_parallel": 1,
+  "tasks": [
+    {
+      "key": "hello-pyramid",
+      "task_type": "coding",
+      "wire_class": "coding",
+      "engine": "opencode",
+      "model": "feeder/auto/coding",
+      "timeout_s": 180,
+      "spec": "Write a single Python script named ./hello_pyramid.py in your current directory. When run with `python3 hello_pyramid.py` it must: (1) print the exact line `Hello World`, then (2) print a pyramid of `*` characters that is 8 rows high — each row has more stars than the one above it, forming a pyramid (a centred pyramid with rows of 1,3,5,...,15 stars is ideal, but any 8-row shape with a strictly increasing star count per row is acceptable). Write ONLY hello_pyramid.py. No other files, no extra prose in the output beyond Hello World and the pyramid.",
+      "check": "python3 hello_pyramid.py > out.txt 2>&1 || { echo 'FAIL: script errored'; cat out.txt; exit 1; }; grep -q 'Hello World' out.txt || { echo 'FAIL: did not print Hello World'; cat out.txt; exit 1; }; python3 -c \"import sys;L=[l for l in open('out.txt').read().splitlines() if '*' in l];c=[l.count('*') for l in L];print('star rows:',len(c),'| stars/row:',c);sys.exit(0 if len(c)==8 and all(c[i]<c[i+1] for i in range(7)) else 1)\" || { echo 'FAIL: not an 8-row strictly-increasing pyramid'; cat out.txt; exit 1; }; echo 'PASS: runs, prints Hello World + valid 8-row pyramid'",
+      "expect_files": ["hello_pyramid.py"],
+      "verified": "hello_pyramid.py runs, prints Hello World, then an 8-row strictly-increasing star pyramid (executed, not just present)"
+    }
+  ]
+}

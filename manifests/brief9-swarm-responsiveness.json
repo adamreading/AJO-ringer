@@ -1,0 +1,19 @@
+{
+  "run_name": "brief9-swarm-responsiveness",
+  "workdir": "/tmp/ringer-brief9",
+  "max_parallel": 1,
+  "tasks": [
+    {
+      "key": "arithmetic",
+      "task_type": "math",
+      "wire_class": "math",
+      "engine": "opencode",
+      "model": "feeder/auto/math",
+      "timeout_s": 120,
+      "spec": "Responsiveness smoke test. Compute 2 + 2. Write ONLY the file ./answer.txt in your current directory, containing exactly the single integer result and nothing else — no words, no punctuation, no explanation.",
+      "check": "grep -qw 4 answer.txt && echo 'correct: swarm returned 4' || { echo 'FAIL: answer.txt must contain 4'; cat answer.txt 2>/dev/null; exit 1; }",
+      "expect_files": ["answer.txt"],
+      "verified": "answer.txt contains 4 — swarm round-trip works"
+    }
+  ]
+}
