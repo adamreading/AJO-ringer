@@ -1,0 +1,19 @@
+{
+  "run_name": "grounded-research-{{TOPIC}}",
+  "workdir": "{{WORKDIR}}",
+  "max_parallel": 4,
+  "tasks": [
+    {
+      "key": "{{ANALYSIS_KEY}}",
+      "task_type": "research",
+      "wire_class": "reasoning",
+      "engine": "opencode",
+      "model": "feeder/auto/reasoning",
+      "timeout_s": 300,
+      "spec": "You are an analyst working from a PRE-GATHERED, source-cited research corpus. Read the corpus for your source material: {{CORPUS_PATH}} (a markdown file of vetted findings, each with a source URL). Do NOT web-search and do NOT invent sources — every factual claim in your output must be supported by the corpus, and you must cite the corpus's source URLs. YOUR ANALYSIS TASK: {{ANALYSIS_INSTRUCTIONS}}. Write your analysis to ./report.md with clear section headers and, for every claim, the corpus URL that backs it. If the corpus lacks evidence for part of the task, say so explicitly rather than filling the gap from prior knowledge. Write ONLY report.md.",
+      "check": "python3 {{CHECK_SCRIPT_PATH}} --report report.md --corpus {{CORPUS_PATH}} --min-urls {{MIN_CORPUS_URLS}}",
+      "expect_files": ["report.md"],
+      "verified": "report.md analyses the assigned slice using ONLY corpus-sourced URLs (cross-referenced against the corpus), with substantive content"
+    }
+  ]
+}

@@ -83,6 +83,37 @@ page — never `cat` result files into the terminal as the reveal. If a result
 matters, it belongs in the artifact; if it isn't there, that's a harvest gap
 to fix (declare it in `expect_files`), not a reason to bypass the page.
 
+## Swarm-worthiness triage — run BEFORE authoring a manifest
+
+Especially the instant a plain-text brief lands from a client/Lunk. The swarm's
+worker tokens are near-free (free/cheap Feeder models, input-churn); the scarce
+resource is YOUR Opus orchestration. So the question is never "can the swarm do
+this" — it's **"is orchestrating this cheaper than just answering it?"**
+
+**Answer directly (do NOT swarm) when ANY holds:**
+- it resolves to ONE reasoning/research answer, no artifact to build
+- correctness is judgment — no cheap executable check can prove it
+- specifying it means baking the answer into the spec
+- it's ≤2 small tasks, or the client is waiting in-thread (latency-sensitive)
+
+For a live-info question: ground it yourself (WebSearch/WebFetch) and answer in the
+receipt thread. Only fan out the ANALYSIS if it is itself parallel/voluminous
+(see the grounded-research default above).
+
+**Swarm it when ≥2 hold:** parallel (≥3 independent tasks) · verifiable (a cheap
+executable check = exit-0 truth) · agentic/tool-heavy or real-repo (wants isolation) ·
+voluminous/repetitive (spec once, run N).
+
+**The test** (cost-mirror of the tiny-edit death spiral): *if writing the spec + check
+costs nearly as much thinking as just answering, answer.*
+
+**Three tiers for a client brief** (Lunk): (1) **answer** — brief is a question → answer
+directly in the receipt thread + one line "answered directly, not swarm-worthy (…)" so
+the cost call is auditable; (2) **offer** — borderline (some parallelism but you can
+answer well) → answer AND offer to fan out for independent verification/coverage with a
+rough cost/time; (3) **swarm** — clears the triage → author the manifest and run it.
+Full rationale + the token economics: the Swarm-ROI report.
+
 ## Spec-writing craft
 
 Workers are stateless and cannot ask questions. Every spec must be
@@ -286,6 +317,58 @@ both routing and the quality feed. Enforcement is the orchestrator's job:
 5. **Quality feedback keys on wire_class** (Feeder's task_scores granularity),
    never on local task_type — two scoreboards at two granularities, deliberately.
 
+## Research grounding — free web-search augment + fallback (THIS MACHINE, 2026-07-17)
+
+Feeder's free **Ollama web_search augmentation** is live (active backend; Tavily
+inactive). Web content is huge Opus *input*, so grounding research yourself is the
+expensive path — augmentation moves that ingestion onto free workers (Swarm-ROI
+finding). How to run research now:
+
+1. **DEFAULT: ground once, fan out analysis** (`templates/grounded-research/`) — the
+   cheapest + most robust pattern. YOU run a handful of targeted WebSearch/WebFetch
+   calls up front (this uses your OWN search, which does NOT touch Feeder's rate-limited
+   Ollama tier), vet the sources, and write ONE cited `corpus.md`. Then fan cheap
+   analysis workers (`engine: opencode`, NO augment) out over that corpus — they read it
+   as source material and cite its URLs, never searching. The check
+   (`checks/grounded-analysis.py`) cross-references each report's URLs against the corpus
+   so a worker can't hallucinate a source. Result: ~6 searches → 1 grounding pass (vs a
+   ~60-search augmented burst), off-tier, source-controlled, free analysis workers.
+   Only fan out the analysis if it has parallel slices; a single reasoning answer isn't
+   swarm-worthy (Swarm-ROI triage) — just ground + answer.
+
+   **FALLBACK: worker-augment** (`engine: opencode-research`, `consumer:"ringer-research"`
+   + `augment:"force"`) — ONLY when the research is too broad to pre-gather, so workers
+   must search live. Then run at LOW concurrency (`--max-parallel` 2-3) so the burst
+   doesn't self-exhaust the free tier, require cited sources in the spec, and it is
+   MANDATORY to run the post-hoc `augmented` audit (rule 3) before trusting the output.
+2. **Pre-flight the free tier** (KEYED, hourly + weekly caps → it CAN exhaust):
+   before a research swarm run `python3 /home/ajo/ringer/scripts/search_preflight.py`
+   — exit 0 = augment live (route workers through it); exit 2 = throttled/off →
+   **FALLBACK: YOU ground it** with WebSearch/WebFetch and bake facts+sources into the
+   specs (augment off — the classic grounded pattern). exit 1 = Feeder unreachable →
+   also self-ground.
+3. **Post-hoc audit is the REAL guard — the pre-flight is NOT enough** (learned live
+   2026-07-17, brief #11): a big parallel augment burst SELF-EXHAUSTS the free tier
+   MID-RUN — a 6-worker run fired ~60 calls in ~2 min, blew the Ollama hourly cap, and
+   every call came back `augmented:false` (workers ran blind, hallucinated URLs) even
+   though the pre-flight was green. So ALWAYS run the post-hoc audit before trusting
+   worker research: `GET /api/requests?consumer=ringer-research` (or `feeder_enrich`'s
+   `augmented` flag). Any requested-augment call with `augmented:false` never got fresh
+   grounding → re-ground yourself or answer directly. Never ship a silently-blind answer.
+   And **throttle concurrency for augment swarms (`--max-parallel` 2-3)** to stay under
+   the free-tier rate, or just Opus-ground broad research outright. (Don't inject the
+   whole failed report into retries either — it 400s free models.) Checks for research
+   should assert grounding happened, not proxy it with a URL count.
+4. **Ground yourself directly (augment off) when:** it's a high-stakes call Adam acts
+   on and you want tight source control; the query strategy is subtle; or the research
+   is broad enough to hit the free-tier throttle across parallel workers (ground once,
+   feed all — the WC#7 pattern, `manifests/brief7-wc2026-grounded.json`). For a single
+   research *question* answered directly, use your own WebSearch unless page ingestion
+   is heavy enough to delegate to one augmented worker.
+5. **CODING stays un-augmented — never send `augment` on code tasks** (code must never
+   be silently grounded). This is by convention (coding just never opts in), NOT the
+   `ringer` label: Feeder's hard block is `open-brain` only.
+
 ## Worktrees-mode footguns (learned the hard way)
 
 Run-level `"worktrees": true` gives each task an isolated git worktree of
@@ -316,7 +399,13 @@ someone's untracked scratch files.
    --state ~/.ringer/runs/<run_id>.json --workdir <workdir> --rerender` pulls each
    worker's true routing (served models, failovers, latency) from Feeder into the
    state AND re-renders the run's report + live pages so the "Served by" strips
-   show immediately. Idempotent; safe on already-enriched states.
+   show immediately. Idempotent; safe on already-enriched states. It ALSO writes a
+   run-level `feeder_totals` block (job token burn: input/output/total, calls,
+   per-model) — surfaced as the report page's "Token burn" strip.
+0b. **Quote the token burn in the Relay answer** (Adam's directive 2026-07-16): after
+   enrich, run `python3 /home/ajo/ringer/scripts/token_summary.py --state ~/.ringer/runs/<run>.json`
+   and include its one-line summary in the DONE receipt / response — every swarm answer
+   states what it cost (total tokens in/out + top models). Feeder-routed runs only.
 1. Read the run JSON in `~/.ringer/runs/` — statuses, retries, durations.
 2. For any retried or failed task, read the raw worker log in
    `<workdir>/logs/` before deciding anything. Retries that passed on
@@ -354,7 +443,7 @@ Rules: grade the outcome, not the effort; mixed-model attempts are auto-skipped
 metric); backpressured attempts score nobody; grade only what the checks and raw
 logs support.
 
-Your explicit `--grade` scores are now also **persisted back into the run JSON**
+Your explicit `--grade` scores are also **persisted back into the run JSON**
 (`quality_score`/`grade_source` per task) and shown as a coloured grade pill next to
 each agent's model on the Ringside wall — so grading isn't just fed to the router, it
 tells the human how well each agent did. Only explicit grades appear (heuristic
