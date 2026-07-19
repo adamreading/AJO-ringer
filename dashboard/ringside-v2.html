@@ -9,7 +9,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
 </head>
 <body>
-  <!-- Matrix rain canvas (h4 theme only) -->
+  <!-- Matrix rain canvas (h4 theme only; opacity driven by the rain-intensity setting) -->
   <div class="matrix-overlay">
     <canvas id="matrix-canvas"></canvas>
   </div>
@@ -49,6 +49,10 @@
           <span id="live-count">0 SWARMS LIVE</span>
         </div>
         <div class="topbar-right">
+          <button id="feed-btn" class="topbar-button" type="button" aria-label="Activity feed">
+            FEED <span id="feed-count" class="topbar-count">0</span>
+          </button>
+          <button id="artifacts-btn" class="topbar-button" type="button" aria-label="Artifacts">ARTIFACTS</button>
           <button id="theme-label" class="theme-toggle" type="button" aria-label="Current theme"></button>
           <time id="clock" class="clock"></time>
         </div>
@@ -60,75 +64,47 @@
         <div id="kpi-strip" class="kpi-strip">
           <div class="kpi">
             <div class="kpi-label">Active Workers</div>
-            <div class="kpi-value accent" id="kpi-active">0</div>
-            <div class="kpi-sub" id="kpi-active-sub">idle</div>
+            <div class="kpi-line"><span class="kpi-value accent" id="kpi-active">0</span><span class="kpi-sub" id="kpi-active-sub">idle</span></div>
           </div>
           <div class="kpi">
             <div class="kpi-label">Passed</div>
-            <div class="kpi-value pass" id="kpi-passed">0</div>
-            <div class="kpi-sub" id="kpi-passed-sub">&mdash;</div>
+            <div class="kpi-line"><span class="kpi-value pass" id="kpi-passed">0</span><span class="kpi-sub" id="kpi-passed-sub">&mdash;</span></div>
+            <div class="kpi-bar"><span id="kpi-passed-bar" style="width:0%"></span></div>
           </div>
           <div class="kpi">
             <div class="kpi-label">Failed</div>
-            <div class="kpi-value fail" id="kpi-failed">0</div>
-            <div class="kpi-sub" id="kpi-failed-sub">&mdash;</div>
+            <div class="kpi-line"><span class="kpi-value fail" id="kpi-failed">0</span><span class="kpi-sub" id="kpi-failed-sub">&mdash;</span></div>
           </div>
           <div class="kpi">
             <div class="kpi-label">Tokens</div>
-            <div class="kpi-value" id="kpi-tokens">0</div>
-            <div class="kpi-sub" id="kpi-tokens-sub">&mdash;</div>
+            <div class="kpi-line"><span class="kpi-value" id="kpi-tokens">0</span><span class="kpi-sub" id="kpi-tokens-sub">&mdash;</span></div>
           </div>
           <div class="kpi">
             <div class="kpi-label">Elapsed</div>
-            <div class="kpi-value" id="kpi-elapsed">&mdash;</div>
-            <div class="kpi-sub" id="kpi-elapsed-sub">&mdash;</div>
+            <div class="kpi-line"><span class="kpi-value" id="kpi-elapsed">&mdash;</span><span class="kpi-sub" id="kpi-elapsed-sub">&mdash;</span></div>
           </div>
           <div class="kpi">
             <div class="kpi-label">Throughput</div>
-            <div class="kpi-value" id="kpi-throughput">&mdash;</div>
-            <div class="kpi-sub" id="kpi-throughput-sub">tasks/min</div>
+            <div class="kpi-line"><span class="kpi-value" id="kpi-throughput">&mdash;</span><span class="kpi-sub" id="kpi-throughput-sub">tasks/min</span></div>
           </div>
         </div>
 
-        <!-- Content Grid -->
-        <div class="content-grid">
-          <!-- Left: Runs -->
-          <div id="runs-container"></div>
-
-          <!-- Right: Artifact + Activity -->
-          <div class="artifact-panel">
-            <div class="glass">
-              <div class="panel-head">
-                <div class="panel-title">Artifact</div>
-                <div id="artifact-status" style="margin-left:auto;color:var(--muted);font-size:11px;"></div>
-              </div>
-              <div class="artifact-controls" style="padding:10px 16px;display:flex;gap:8px;">
-                <select id="artifact-picker" aria-label="Select artifact" style="flex:1;"></select>
-                <select id="artifact-version" aria-label="Artifact version" style="flex:1;"></select>
-              </div>
-              <div id="artifact-preview" class="artifact-preview">
-                <span>No artifacts yet</span>
-              </div>
-            </div>
-
-            <div class="glass">
-              <div class="panel-head">
-                <div class="panel-title">Activity Feed</div>
-              </div>
-              <div id="activity-feed" class="activity-feed"></div>
-            </div>
-          </div>
+        <!-- Job picker: chip strip (replaces the old bottom bar) -->
+        <div class="job-chips-row">
+          <span class="job-chips-label">Jobs</span>
+          <div id="job-chips" class="job-chips"></div>
         </div>
 
-        <!-- Bottom Bar -->
-        <div id="bottom-bar" class="bottom-bar"></div>
+        <!-- Jobs list: three-level progressive disclosure, full width -->
+        <div id="runs-container" class="jobs-list"></div>
       </div>
 
       <!-- Analytics Page -->
       <div class="page-panel" data-page="analytics" hidden>
-        <div class="analytics-toolbar glass">
-          <div><span class="eyebrow">Performance intelligence</span><h1>Analytics command center</h1><p>Compare model reliability, throughput, cost proxies, and task fit.</p></div>
-          <div class="analytics-actions"><span id="analytics-data-status" class="data-status"></span></div>
+        <div class="page-heading">
+          <div class="page-heading-title">Analytics</div>
+          <div class="page-heading-sub">model reliability &middot; throughput &middot; cost &mdash; fed by the eval log + feeder quality feed</div>
+          <span id="analytics-data-status" class="data-status"></span>
         </div>
         <!-- Summary KPI row -->
         <div id="analytics-summary" class="analytics-kpi-row"></div>
@@ -145,7 +121,7 @@
           </div>
         </div>
 
-        <!-- Charts row 2: Latency + Request Volume -->
+        <!-- Charts row 2: Latency + Tokens per Task -->
         <div class="analytics-grid-2">
           <div class="glass analytics-chart-panel">
             <div class="panel-head"><div class="panel-title">Avg Latency by Model (ms)</div></div>
@@ -173,34 +149,35 @@
         <div class="glass analytics-chart-panel" style="margin-bottom:16px;">
           <div class="panel-head"><div class="panel-title">Quality vs Latency Trade-off</div></div>
           <div class="chart-wrap"><canvas id="chart-scatter"></canvas></div>
+          <div class="chart-caption">top-left is the sweet spot: high quality, low latency.</div>
         </div>
 
         <!-- Full scoreboard table -->
         <div class="glass" style="margin-bottom:16px;">
           <div class="panel-head"><div class="panel-title">Full Model Scoreboard</div></div>
-          <div id="analytics-table" style="padding:16px;overflow-x:auto;"></div>
+          <div id="analytics-table" class="table-scroll"></div>
         </div>
       </div>
 
-      <!-- Models Page (same as analytics, redirects there) -->
+      <!-- Models Page: real per-wire-class scoreboard -->
       <div class="page-panel" data-page="models" hidden>
-        <div class="glass">
-          <div class="panel-head"><div class="panel-title">Model Scoreboard</div></div>
-          <div id="models-content" style="padding:16px;">
-            <p style="color:var(--muted);">See Analytics page for full model data.</p>
-          </div>
+        <div class="page-heading">
+          <div class="page-heading-title">Model Scoreboard</div>
+          <div class="page-heading-sub">ranked by orchestrator score, filtered by wire_class (prompt type) &middot; identity per docs/TAXONOMY.md</div>
         </div>
+        <div id="models-content"></div>
       </div>
 
-      <!-- Queue Page (swarm work-queue kanban; data-* hooks for Claude Design) -->
+      <!-- Queue Page (swarm work-queue kanban) -->
       <div class="page-panel" data-page="queue" hidden>
         <div class="queue-toolbar" data-queue-toolbar>
-          <div class="panel-title">Swarm Queue</div>
-          <button class="control-button" type="button" data-action="file-task">+ File job</button>
+          <div class="page-heading-title">Swarm Queue</div>
+          <div class="page-heading-sub">work-queue kanban &mdash; agents claim, run, verify</div>
+          <button class="solid-button" type="button" data-action="file-task">+ File job</button>
           <span class="queue-meta" data-queue-meta>&mdash;</span>
         </div>
         <div class="kanban" id="kanban-board" data-kanban>
-          <p style="color:var(--muted);padding:16px;">Loading queue&hellip;</p>
+          <p class="empty-state">Loading queue&hellip;</p>
         </div>
       </div>
       <!-- Task detail modal (receipt thread + light human steering) -->
@@ -208,24 +185,84 @@
         <div class="queue-modal-card" role="dialog" aria-modal="true" data-queue-modal-card></div>
       </div>
 
+      <!-- Theme Designer Page -->
       <div class="page-panel" data-page="settings" hidden>
-        <section class="theme-designer glass">
-          <div class="panel-head"><div><div class="panel-title">Custom Theme Designer</div><p class="panel-copy">Design a personal Ringside skin. Changes preview instantly and are saved in this browser.</p></div><button id="theme-reset" class="control-button" type="button">Reset design</button></div>
-          <div class="theme-designer-grid">
-            <div class="theme-form">
-              <label>Base appearance<select id="designer-base"><option value="dark">Dark</option><option value="light">White</option><option value="grey">Grey</option><option value="black">Black</option></select></label>
-              <label>Accent colour<input id="designer-accent" type="color" value="#35d0ff"></label>
-              <label>Background colour<input id="designer-background" type="color" value="#06090f"></label>
-              <label>Panel overlay<input id="designer-overlay" type="range" min="0" max="100" value="55"><output id="designer-overlay-value">55%</output></label>
-              <label class="upload-control">Background image<input id="designer-upload" type="file" accept="image/*"><span>Upload image</span></label>
+        <div class="page-heading">
+          <div class="page-heading-title">Theme Designer</div>
+          <div class="page-heading-sub">design a personal Ringside skin &mdash; changes preview instantly and are saved in this browser</div>
+        </div>
+        <div class="theme-designer-grid">
+          <section class="glass theme-form">
+            <div class="designer-field">
+              <div class="designer-label">Base appearance</div>
+              <div class="segmented" id="designer-base" role="radiogroup" aria-label="Base appearance">
+                <button type="button" data-base="dark">Dark</button>
+                <button type="button" data-base="white">White</button>
+                <button type="button" data-base="grey">Grey</button>
+                <button type="button" data-base="black">Black</button>
+              </div>
+            </div>
+            <div class="designer-field">
+              <div class="designer-label">Accent</div>
+              <div class="swatch-row" id="designer-swatches" aria-label="Accent colour">
+                <button type="button" class="swatch" data-accent="#00ff41" style="background:#00ff41" aria-label="Green"></button>
+                <button type="button" class="swatch" data-accent="#35d0ff" style="background:#35d0ff" aria-label="Cyan"></button>
+                <button type="button" class="swatch" data-accent="#ff2fd2" style="background:#ff2fd2" aria-label="Magenta"></button>
+                <button type="button" class="swatch" data-accent="#ffea00" style="background:#ffea00" aria-label="Yellow"></button>
+                <input id="designer-accent" type="color" value="#35d0ff" aria-label="Custom accent colour">
+              </div>
+            </div>
+            <div class="designer-field">
+              <div class="designer-label">Background colour</div>
+              <input id="designer-background" type="color" value="#06090f" aria-label="Background colour">
+            </div>
+            <div class="designer-field">
+              <div class="designer-label designer-label-split"><span>Panel opacity</span><output id="designer-overlay-value">55%</output></div>
+              <input id="designer-overlay" type="range" min="0" max="100" value="55" aria-label="Panel opacity">
+            </div>
+            <div class="designer-field">
+              <div class="designer-label designer-label-split"><span>Matrix rain intensity</span><output id="designer-rain-value">28%</output></div>
+              <input id="designer-rain" type="range" min="0" max="100" value="28" aria-label="Matrix rain intensity">
+              <div class="designer-hint">0% disables the rain entirely. Rain never draws above panels. (h4 theme only.)</div>
+            </div>
+            <div class="designer-field">
+              <div class="designer-label">Background image</div>
+              <div class="drop-zone" id="designer-dropzone" role="button" tabindex="0">drop image or click to upload</div>
+              <input id="designer-upload" type="file" accept="image/*" hidden>
               <button id="designer-clear-image" class="text-button" type="button">Remove background image</button>
             </div>
-            <div class="theme-preview" id="theme-preview"><div class="preview-orb"></div><span>LIVE PREVIEW</span><strong>Ringside</strong><small>Your dashboard, your signal.</small></div>
-          </div>
-        </section>
+            <button id="theme-reset" class="danger-button" type="button">Reset design</button>
+          </section>
+          <section class="glass theme-preview-panel">
+            <div class="designer-label">Live preview</div>
+            <div class="theme-preview" id="theme-preview">
+              <div class="preview-row"><span class="preview-orb"></span><strong>RINGSIDE</strong><span class="preview-live">LIVE</span></div>
+              <div class="preview-bar"><span style="width:72%"></span></div>
+              <small>Your dashboard, your signal. Panels stay legible at any rain intensity.</small>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   </div>
+
+  <!-- Slide-over drawers: Feed + Artifacts -->
+  <div id="drawer-scrim" class="drawer-scrim" hidden></div>
+  <aside id="drawer" class="drawer" hidden aria-label="Drawer">
+    <div class="drawer-head">
+      <span id="drawer-title" class="drawer-title"></span>
+      <button id="drawer-close" class="drawer-close" type="button" aria-label="Close">&#10005;</button>
+    </div>
+    <div id="drawer-feed" class="drawer-body" hidden></div>
+    <div id="drawer-artifact" class="drawer-body drawer-artifact" hidden>
+      <div class="artifact-controls">
+        <select id="artifact-picker" aria-label="Select artifact"></select>
+        <select id="artifact-version" aria-label="Artifact version"></select>
+      </div>
+      <div id="artifact-preview" class="artifact-preview"><span>No artifacts yet</span></div>
+      <a id="artifact-open" class="artifact-open" href="#" target="_blank" rel="noopener" hidden>open in new tab &#8599;</a>
+    </div>
+  </aside>
 
   <script src="ringside-v2.js"></script>
 </body>

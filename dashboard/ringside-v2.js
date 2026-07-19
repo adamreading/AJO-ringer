@@ -1,6 +1,11 @@
 /* ============================================================================
  * Ringside v2 — Dashboard logic for monitoring AI agent swarms
  * Self-contained IIFE. Calls init() on DOMContentLoaded.
+ *
+ * Dashboard = three-level progressive disclosure:
+ *   job row → rounds → worker table → worker detail (BRIEF / ACTIONS / OUTPUT)
+ * Everything starts collapsed; expand state lives in Maps keyed by stable ids
+ * so the 1s poll re-render never collapses what the human opened.
  * ========================================================================= */
 (function () {
   'use strict';
@@ -12,18 +17,23 @@
     artifacts: [],
     theme: localStorage.getItem('ringside-theme') || 'dark',
     currentPage: 'dashboard',
-    expandedWorkers: new Map(),   // key → true
+    expanded: new Map(),          // 'j:<jobName>' / 'r:<runId>' → true
+    expandedWorkers: new Map(),   // '<runId>::<taskKey>' → true (pollers iterate this)
+    workerTabs: new Map(),        // compositeKey → 'brief' | 'actions' | 'output'
     transcripts: new Map(),       // compositeKey → parsed /transcript payload
     liveModels: new Map(),        // compositeKey → parsed /live-model payload (real served model)
-    selectedRun: '',
+    selectedJob: '',              // '' = all jobs (chip strip filter)
+    drawer: null,                 // null | 'feed' | 'artifact'
+    feedEvents: [],
     selectedArtifact: '',
-    artifactVersion: 'live',
+    artifactVersion: '',          // '' = latest
     modelsData: null,
     canon: [],            // feeder's real model catalog (/api/canon)
     usage: [],            // Ringer's served-model x class outcomes (/api/usage)
-    modelsClass: 'coding',// selected class on the Models best-per-class finder
+    modelsClass: 'all',   // selected wire_class chip on the Models scoreboard
     queue: { tasks: [], selected: null, mode: null }, // swarm work-queue kanban (/agent-tasks)
     apiBase: '',
+    rainIntensity: 28,
     kirbyActive: false,
     kirbyShiftStart: 0,
     kirbyClickCount: 0,
@@ -32,7 +42,6 @@
 
   let matrixAnimId = null;
   let matrixCanvas = null;
-  let clockInterval = null;
 
   // ── Kirby Data ───────────────────────────────────────────────────────────
   const KIRBYS = [
@@ -84,6 +93,14 @@
   /** Comma-group an integer (31591 -> "31,591"), fail-safe for non-numbers. */
   function withCommas(n) {
     return Math.round(numberOrZero(n)).toLocaleString('en-US');
+  }
+
+  /** Format a latency in ms (e.g. 1830 → "1.8s", 340 → "340ms"). */
+  function formatLatency(ms) {
+    ms = numberOrZero(ms);
+    if (!ms) return '';
+    if (ms < 1000) return Math.round(ms) + 'ms';
+    return (ms / 1000).toFixed(1) + 's';
   }
 
   /**
@@ -152,6 +169,12 @@
     return task.model || '';
   }
 
+  /** Per-task latency (feeder-enriched p50, ms) or 0. */
+  function taskLatency(task) {
+    var fed = task.feeder || {};
+    return numberOrZero(fed.latency_ms_p50);
+  }
+
   /** Stable task key. */
   function taskKey(task, i) {
     return task.key || task.name || 'task-' + i;
@@ -175,6 +198,12 @@
     return map[kind] || 'Waiting';
   }
 
+  /** Icon character for task kind. */
+  function kindIcon(kind) {
+    var icons = { pass: '✓', working: '▶', retry: '↻', fail: '✗', interrupted: '⊘', waiting: '○' };
+    return icons[kind] || '○';
+  }
+
   /** Brief activity text for a task. */
   function taskActivity(task) {
     if (!task) return '';
@@ -183,6 +212,29 @@
     if (k === 'working') return task.step || 'running...';
     if (k === 'retry') return 'attempt ' + (numberOrZero(task.attempt) + 1);
     return '';
+  }
+
+  /** First non-empty line of a string-or-array-of-lines. */
+  function firstLine(v) {
+    var s = Array.isArray(v) ? v.join('\n') : String(v == null ? '' : v);
+    var lines = s.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].trim()) return lines[i].trim();
+    }
+    return '';
+  }
+
+  /** "LAST CHECK" cell: the most informative one-liner we have for the task. */
+  function lastCheckNote(task) {
+    var kind = taskKind(task);
+    if (kind === 'working' || kind === 'retry') return taskActivity(task);
+    var tail = firstLine(task.check_output_tail);
+    if (kind === 'fail') return tail || (task.verdict ? String(task.verdict) : 'FAILED');
+    if (kind === 'pass') {
+      var rc = task.check_returncode;
+      return tail || ('check rc=' + (rc == null ? 0 : rc));
+    }
+    return taskActivity(task) || '';
   }
 
   /** Strip ANSI escape codes from worker log text. */
@@ -230,6 +282,7 @@
         done: done,
         total: tasks.length,
         tokens: tokens,
+        elapsedS: numberOrZero(run.elapsed_s),
         startedAt: parseTime(run.started_at || run.startedAt || run.started),
         finishedAt: parseTime(run.finished_at || run.finishedAt),
         isLive: run.state === 'live' || !!state.active[id],
@@ -245,6 +298,8 @@
       if (a.isLive !== b.isLive) return a.isLive ? -1 : 1;
       return (b.startedAt || 0) - (a.startedAt || 0);
     });
+
+    state.feedEvents = collectFeedEvents();
   }
 
   /** Normalize the /api/library payload into an artifacts array. */
@@ -282,7 +337,7 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         normalizeLibrary(data);
-        render();
+        if (state.drawer === 'artifact') updateArtifactDrawer();
       })
       .catch(function () {});
   }
@@ -300,11 +355,9 @@
     });
   }
 
-
   function apiUrl(path) { return state.apiBase + path; }
 
   // ── Swarm Queue (kanban over the agent-API) ────────────────────────────────
-  // Rough functional substrate: real data + data-* hooks; Claude Design restyles.
   var QUEUE_COLUMNS = [
     { key: 'standing', label: 'Standing' },
     { key: 'todo', label: 'To do' },
@@ -355,10 +408,11 @@
           '<div class="queue-card-title">' + qesc(t.title || ('task #' + t.id)) + '</div>' +
           '<div class="queue-card-meta">' +
             '<span data-field="id">#' + t.id + '</span>' +
-            '<span data-field="agent">' + qesc(t.agent_code) + '</span>' +
+            '<span class="queue-chip" data-field="agent">' + qesc(t.agent_code) + '</span>' +
             (t.priority ? '<span data-field="priority">p' + qesc(t.priority) + '</span>' : '') +
             (t.attempts ? '<span data-field="attempts">try ' + qesc(t.attempts) + '</span>' : '') +
             (t.claimed_by ? '<span data-field="claimed">@' + qesc(t.claimed_by) + '</span>' : '') +
+            '<span class="queue-age" data-field="age">' + qesc(relativeAgo(t.updated_at || t.created_at) || '') + '</span>' +
           '</div>' +
           (t.blocked_reason ? '<div class="queue-card-blocked" data-field="blocked">' + qesc(t.blocked_reason) + '</div>' : '') +
         '</div>';
@@ -562,7 +616,7 @@
     document.documentElement.setAttribute('data-theme', name);
     localStorage.setItem('ringside-theme', name);
 
-    if (name === 'h4') {
+    if (name === 'h4' && state.rainIntensity > 0) {
       startMatrixRain();
     } else {
       stopMatrixRain();
@@ -581,11 +635,12 @@
     }
   }
 
-  /** Start the full-screen matrix rain canvas effect. */
+  /** Start the full-screen matrix rain canvas effect (h4 only).
+   * Draw color is deliberately dim (#0a7d2b) and the canvas element opacity
+   * tracks the rain-intensity setting so panels always win. */
   function startMatrixRain() {
     if (matrixAnimId) return;
 
-    // Use the existing canvas from HTML; show the overlay
     matrixCanvas = document.getElementById('matrix-canvas');
     var overlay = document.querySelector('.matrix-overlay');
     if (!matrixCanvas || !overlay) return;
@@ -612,9 +667,13 @@
     window.addEventListener('resize', resize);
 
     function draw() {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+      if (!matrixCanvas) return;
+      var intensity = Math.max(0, Math.min(100, numberOrZero(state.rainIntensity)));
+      if (intensity === 0) { stopMatrixRain(); return; }
+      matrixCanvas.style.opacity = String(intensity / 100);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.07)';
       ctx.fillRect(0, 0, matrixCanvas.width, matrixCanvas.height);
-      ctx.fillStyle = '#00ff41';
+      ctx.fillStyle = '#0a7d2b';
       ctx.font = fontSize + 'px monospace';
 
       for (var i = 0; i < columns; i++) {
@@ -626,7 +685,7 @@
         if (y > matrixCanvas.height && Math.random() > 0.975) {
           drops[i] = 0;
         }
-        drops[i]++;
+        drops[i] += 0.5;
       }
 
       matrixAnimId = requestAnimationFrame(draw);
@@ -644,6 +703,14 @@
     var overlay = document.querySelector('.matrix-overlay');
     if (overlay) overlay.style.display = 'none';
     matrixCanvas = null;
+  }
+
+  /** React to a rain-intensity change (designer slider). */
+  function applyRainIntensity(value) {
+    state.rainIntensity = Math.max(0, Math.min(100, numberOrZero(value)));
+    if (state.theme !== 'h4') return;
+    if (state.rainIntensity === 0) stopMatrixRain();
+    else if (!matrixAnimId) startMatrixRain();
   }
 
   // ── DOM Helpers ──────────────────────────────────────────────────────────
@@ -786,12 +853,11 @@
     updateKPIs();
 
     if (state.currentPage === 'dashboard') {
-      morphInto('#runs-container', renderRuns());
-      updateArtifactPanel();
-      morphInto('#activity-feed', renderActivityFeed());
+      morphInto('#job-chips', renderJobChips());
+      morphInto('#runs-container', renderJobs());
     }
 
-    morphInto('#bottom-bar', renderBottomBar());
+    if (state.drawer === 'feed') updateFeedDrawer();
   }
 
   /** Morph content into a container selected by CSS selector. */
@@ -812,8 +878,12 @@
       badge.hidden = false;
       badge.classList.toggle('active', liveCount > 0);
       var countEl = document.getElementById('live-count');
-      if (countEl) countEl.textContent = liveCount > 0 ? liveCount + ' SWARMS LIVE' : 'IDLE';
+      if (countEl) countEl.textContent = liveCount > 0 ? liveCount + (liveCount === 1 ? ' SWARM LIVE' : ' SWARMS LIVE') : 'IDLE';
     }
+
+    // Feed count
+    var feedCount = document.getElementById('feed-count');
+    if (feedCount) feedCount.textContent = String(state.feedEvents.length);
 
     // Theme label
     var themeLabel = document.getElementById('theme-label');
@@ -841,6 +911,7 @@
   function updateKPIs() {
     var activeWorkers = 0, passed = 0, failed = 0, totalTokens = 0;
     var earliest = Infinity, totalDone = 0, totalTasks = 0;
+    var ftIn = 0, ftOut = 0, ftSeen = false;
 
     state.runs.forEach(function (run) {
       totalTasks += run.total;
@@ -849,6 +920,11 @@
       totalDone += run.done;
       totalTokens += run.tokens;
       if (run.startedAt && run.startedAt < earliest) earliest = run.startedAt;
+      if (run.feederTotals) {
+        ftSeen = true;
+        ftIn += numberOrZero(run.feederTotals.input_tokens);
+        ftOut += numberOrZero(run.feederTotals.output_tokens);
+      }
 
       run.tasks.forEach(function (t) {
         var k = taskKind(t);
@@ -869,16 +945,111 @@
     }
 
     setKPI('kpi-active', String(activeWorkers), activeWorkers > 0 ? 'working' : 'idle');
+    var activeEl = document.getElementById('kpi-active');
+    if (activeEl) activeEl.classList.toggle('working', activeWorkers > 0);
     setKPI('kpi-passed', String(passed), totalTasks > 0 ? ((passed / totalTasks * 100).toFixed(0) + '% pass rate') : '—');
+    var passBar = document.getElementById('kpi-passed-bar');
+    if (passBar) {
+      var denom = passed + failed;
+      passBar.style.width = denom > 0 ? (passed / denom * 100).toFixed(0) + '%' : '0%';
+    }
     setKPI('kpi-failed', String(failed));
-    setKPI('kpi-tokens', formatTokens(totalTokens));
-    setKPI('kpi-elapsed', formatDuration(elapsed));
+    setKPI('kpi-tokens', formatTokens(totalTokens),
+      ftSeen ? (formatTokens(ftIn) + ' in / ' + formatTokens(ftOut) + ' out') : '—');
+    setKPI('kpi-elapsed', formatDuration(elapsed), 'oldest run');
     setKPI('kpi-throughput', throughput, 'tasks/min');
   }
 
-  // ── Run Panels ───────────────────────────────────────────────────────────
+  // ── Jobs list: three-level progressive disclosure ────────────────────────
 
-  function renderRuns() {
+  /** Group state.runs into jobs by run_name (a job's runs are its rounds). */
+  function groupJobs() {
+    var jobs = [];
+    var byName = {};
+    state.runs.forEach(function (run) {
+      var name = run.runName || run.label;
+      if (!byName[name]) { byName[name] = { name: name, runs: [] }; jobs.push(byName[name]); }
+      byName[name].runs.push(run);
+    });
+    jobs.forEach(function (j) {
+      j.runs.sort(function (a, b) { return (a.startedAt || 0) - (b.startedAt || 0); }); // round 1..N
+      j.isLive = j.runs.some(function (r) { return r.isLive; });
+      j.latest = j.runs[j.runs.length - 1];
+      j.pass = 0; j.fail = 0; j.tokens = 0; j.elapsedS = 0;
+      j.runs.forEach(function (r) {
+        j.pass += r.pass; j.fail += r.fail;
+        j.tokens += r.tokens; j.elapsedS += r.elapsedS;
+      });
+    });
+    jobs.sort(function (a, b) {
+      if (a.isLive !== b.isLive) return a.isLive ? -1 : 1;
+      return (b.latest.startedAt || 0) - (a.latest.startedAt || 0);
+    });
+    return jobs;
+  }
+
+  /** Chip strip under the KPIs: ALL + one chip per job; live jobs pulse. */
+  function renderJobChips() {
+    var wrapper = el('div');
+    var jobs = groupJobs();
+
+    var allChip = el('button', {
+      className: 'job-chip' + (state.selectedJob === '' ? ' active' : ''),
+      text: 'ALL',
+      attrs: { 'data-key': 'chip-all', type: 'button' },
+      onclick: function () { state.selectedJob = ''; render(); },
+    });
+    wrapper.appendChild(allChip);
+
+    jobs.forEach(function (job) {
+      var chip = el('button', {
+        className: 'job-chip' + (state.selectedJob === job.name ? ' active' : ''),
+        attrs: { 'data-key': 'chip-' + job.name, type: 'button' },
+        onclick: function () {
+          state.selectedJob = (state.selectedJob === job.name) ? '' : job.name;
+          render();
+        },
+      });
+      if (job.isLive) chip.appendChild(el('span', { className: 'chip-live-dot' }));
+      chip.appendChild(txt(job.name));
+      wrapper.appendChild(chip);
+    });
+
+    return wrapper;
+  }
+
+  function isExpanded(key) { return state.expanded.has(key); }
+  function toggleExpanded(key) {
+    if (state.expanded.has(key)) state.expanded.delete(key);
+    else {
+      state.expanded.set(key, true);
+      // Opening a round: resolve the REAL served model for every worker row at
+      // once (the MODEL column), not only when a single worker is expanded.
+      if (key.indexOf('r:') === 0) fetchLiveModels();
+    }
+    render();
+  }
+
+  /**
+   * Composite keys whose worker row is currently visible: every task in an
+   * expanded round, plus any individually-expanded worker. /live-model is cheap
+   * and populates the MODEL column, so we resolve it for all visible rows (the
+   * heavier transcript/log pollers stay scoped to expanded workers only).
+   */
+  function liveModelTargets() {
+    var keys = {};
+    state.expandedWorkers.forEach(function (_v, k) { keys[k] = true; });
+    state.runs.forEach(function (run) {
+      if (!state.expanded.has('r:' + run.id)) return;
+      (run.tasks || []).forEach(function (task, ti) {
+        keys[run.id + '::' + taskKey(task, ti)] = true;
+      });
+    });
+    return Object.keys(keys);
+  }
+
+  /** Level 1+2+3: job rows → rounds → worker table. */
+  function renderJobs() {
     var wrapper = el('div');
 
     if (state.runs.length === 0) {
@@ -890,177 +1061,378 @@
       return wrapper;
     }
 
-    // Filter to selected run if set, otherwise show all
-    var visible = state.selectedRun
-      ? state.runs.filter(function (r) { return r.id === state.selectedRun; })
-      : state.runs;
-
-    // Group runs into JOBS (by run_name). A job's runs are its rounds — one job,
-    // one artifact, rounds accumulate — instead of a flat list of every run.
-    var jobs = [];
-    var byName = {};
-    visible.forEach(function (run) {
-      var name = run.runName || run.label;
-      if (!byName[name]) { byName[name] = { name: name, runs: [] }; jobs.push(byName[name]); }
-      byName[name].runs.push(run);
-    });
-    jobs.forEach(function (j) {
-      j.runs.sort(function (a, b) { return (a.startedAt || 0) - (b.startedAt || 0); }); // round 1..N
-      j.isLive = j.runs.some(function (r) { return r.isLive; });
-      j.latest = j.runs[j.runs.length - 1];
-    });
-    jobs.sort(function (a, b) {
-      if (a.isLive !== b.isLive) return a.isLive ? -1 : 1;
-      return (b.latest.startedAt || 0) - (a.latest.startedAt || 0);
+    var jobs = groupJobs().filter(function (j) {
+      return !state.selectedJob || j.name === state.selectedJob;
     });
 
     jobs.forEach(function (job) {
-      var group = el('div', { className: 'job-group', attrs: { 'data-key': 'job-' + job.name } });
-      var header = el('div', { className: 'job-header' });
+      var jKey = 'j:' + job.name;
+      var jOpen = isExpanded(jKey);
+      var group = el('div', {
+        className: 'job-row' + (job.isLive ? ' live' : '') + (jOpen ? ' open' : ''),
+        attrs: { 'data-key': 'job-' + job.name },
+      });
+
+      // Level 1 — the job header row
+      var header = el('div', {
+        className: 'job-head',
+        attrs: { role: 'button', tabindex: '0' },
+        onclick: function () { toggleExpanded(jKey); },
+      });
+      header.appendChild(el('span', { className: 'job-caret', text: jOpen ? '▾' : '▸' }));
+      header.appendChild(el('span', { className: 'job-dot' + (job.isLive ? ' live' : '') }));
       header.appendChild(el('span', { className: 'job-name', text: job.name }));
       header.appendChild(el('span', {
-        className: 'job-meta',
+        className: 'job-rounds',
         text: job.runs.length + (job.runs.length === 1 ? ' round' : ' rounds'),
       }));
-      if (job.isLive) header.appendChild(el('span', { className: 'job-live', text: 'LIVE' }));
-      // Token burn for the whole job (summed across rounds), from feeder_enrich.
+      var chips = el('span', { className: 'job-passfail' });
+      chips.appendChild(el('span', { className: 'chip-pass', text: '✓' + job.pass }));
+      chips.appendChild(el('span', { className: 'chip-fail', text: '✗' + job.fail }));
+      header.appendChild(chips);
       var burn = jobTokenBurn(job);
-      if (burn) {
-        var tokEl = el('span', { className: 'job-tokens' });
-        tokEl.appendChild(el('span', {
-          className: 'job-tokens-total',
-          text: withCommas(burn.total) + ' tok',
-        }));
-        tokEl.appendChild(el('span', {
-          className: 'job-tokens-split',
-          text: withCommas(burn.input) + ' in / ' + withCommas(burn.output) + ' out'
-            + (burn.calls ? ' · ' + withCommas(burn.calls) + ' calls' : ''),
-        }));
-        header.appendChild(tokEl);
-      }
-      // Expand / collapse EVERY agent window in this job at once (all rounds).
-      var jobKeys = [];
-      job.runs.forEach(function (run) {
-        (run.tasks || []).forEach(function (task, ti) {
-          jobKeys.push(run.id + '::' + taskKey(task, ti));
+      header.appendChild(el('span', {
+        className: 'job-tokens',
+        text: formatTokens(burn ? burn.total : job.tokens) + ' tok',
+      }));
+      header.appendChild(el('span', { className: 'job-elapsed', text: job.elapsedS ? formatDuration(job.elapsedS) : relativeAgo(job.latest.startedAt) }));
+      var total = job.pass + job.fail;
+      var bar = el('span', { className: 'job-bar' });
+      bar.appendChild(el('span', { style: 'width:' + (total ? (job.pass / total * 100).toFixed(0) : 0) + '%' }));
+      header.appendChild(bar);
+      header.appendChild(el('span', {
+        className: 'job-badge' + (job.isLive ? ' live' : ''),
+        text: job.isLive ? 'LIVE' : 'DONE',
+      }));
+      group.appendChild(header);
+
+      // Level 2 — expanded: token split + expand-all + round panels
+      if (jOpen) {
+        var body = el('div', { className: 'job-body' });
+
+        var metaRow = el('div', { className: 'job-meta-row' });
+        if (burn) {
+          metaRow.appendChild(el('span', {
+            className: 'job-token-split',
+            text: 'TOKENS ' + withCommas(burn.input) + ' in / ' + withCommas(burn.output) + ' out'
+              + (burn.calls ? ' · ' + withCommas(burn.calls) + ' calls' : ''),
+          }));
+        }
+        // Every expandable key under this job (rounds + workers), for expand-all.
+        var jobKeys = [];
+        job.runs.forEach(function (run) {
+          jobKeys.push('r:' + run.id);
+          (run.tasks || []).forEach(function (task, ti) {
+            jobKeys.push(run.id + '::' + taskKey(task, ti));
+          });
         });
-      });
-      if (jobKeys.length) {
-        var anyCollapsed = jobKeys.some(function (k) { return !state.expandedWorkers.has(k); });
-        header.appendChild(el('span', {
-          className: 'job-toggle-all',
-          text: anyCollapsed ? 'Expand all' : 'Collapse all',
-          attrs: { role: 'button', tabindex: '0', 'data-key': 'jobtoggle-' + job.name },
+        var anyClosed = jobKeys.some(function (k) {
+          return k.indexOf('::') >= 0 ? !state.expandedWorkers.has(k) : !state.expanded.has(k);
+        });
+        metaRow.appendChild(el('button', {
+          className: 'job-expand-all text-button',
+          text: anyClosed ? 'expand all workers' : 'collapse all',
+          attrs: { type: 'button', 'data-key': 'jobtoggle-' + job.name },
           onclick: function (e) {
             if (e && e.stopPropagation) e.stopPropagation();
             // Recompute live (not from the captured closure): morph can reuse this
             // node and keep an older listener, so decide from current state at click.
-            var collapsedNow = jobKeys.some(function (k) { return !state.expandedWorkers.has(k); });
-            if (collapsedNow) {
-              jobKeys.forEach(function (k) { state.expandedWorkers.set(k, true); });
+            var keysNow = [];
+            job.runs.forEach(function (run) {
+              keysNow.push('r:' + run.id);
+              (run.tasks || []).forEach(function (task, ti) {
+                keysNow.push(run.id + '::' + taskKey(task, ti));
+              });
+            });
+            var closedNow = keysNow.some(function (k) {
+              return k.indexOf('::') >= 0 ? !state.expandedWorkers.has(k) : !state.expanded.has(k);
+            });
+            keysNow.forEach(function (k) {
+              if (k.indexOf('::') >= 0) {
+                if (closedNow) state.expandedWorkers.set(k, true);
+                else state.expandedWorkers.delete(k);
+              } else {
+                if (closedNow) state.expanded.set(k, true);
+                else state.expanded.delete(k);
+              }
+            });
+            if (closedNow) {
               // one call each covers all newly-added keys (the pollers self-iterate the map)
               fetchExpandedTranscripts();
               fetchExpandedWorkerLogs();
               fetchLiveModels();
-            } else {
-              jobKeys.forEach(function (k) { state.expandedWorkers.delete(k); });
             }
             render();
           },
         }));
+        body.appendChild(metaRow);
+
+        // newest round on top, labelled ROUND N (N = chronological round number)
+        job.runs.slice().reverse().forEach(function (run, idx) {
+          body.appendChild(renderRound(run, job.runs.length - idx));
+        });
+        group.appendChild(body);
       }
-      group.appendChild(header);
-      // newest round on top, labelled Round N (N = chronological round number)
-      job.runs.slice().reverse().forEach(function (run, idx) {
-        run.roundLabel = 'Round ' + (job.runs.length - idx);
-        group.appendChild(renderRunPanel(run));
-      });
+
       wrapper.appendChild(group);
     });
 
     return wrapper;
   }
 
-  /** Render a single run as a glass panel with header, progress, and worker grid. */
-  function renderRunPanel(run) {
+  /** Level 2 — a single round (one run). */
+  function renderRound(run, roundN) {
+    var rKey = 'r:' + run.id;
+    var rOpen = isExpanded(rKey);
     var panel = el('div', {
-      className: 'glass run-panel' + (run.isLive ? ' live' : ''),
-      attrs: { 'data-key': 'run-' + run.id },
+      className: 'round' + (run.isLive ? ' live' : '') + (rOpen ? ' open' : ''),
+      attrs: { 'data-key': 'round-' + run.id },
     });
 
-    // Header
-    var header = el('div', { className: 'run-header' });
-    header.appendChild(el('span', { className: 'run-label', text: run.roundLabel || run.label }));
+    var header = el('div', {
+      className: 'round-head',
+      attrs: { role: 'button', tabindex: '0' },
+      onclick: function () { toggleExpanded(rKey); },
+    });
+    header.appendChild(el('span', { className: 'job-caret', text: rOpen ? '▾' : '▸' }));
+    header.appendChild(el('span', { className: 'round-label', text: 'ROUND ' + roundN }));
     header.appendChild(el('span', {
-      className: 'run-status',
+      className: 'round-badge' + (run.isLive ? ' live' : ''),
       text: run.isLive ? 'LIVE' : 'DONE',
     }));
-    header.appendChild(el('span', {
-      className: 'run-progress-text',
-      text: run.done + '/' + run.total,
+    var pct = run.total > 0 ? (run.done / run.total * 100) : 0;
+    var bar = el('span', { className: 'round-bar' });
+    bar.appendChild(el('span', {
+      className: run.fail > 0 ? 'has-fail' : '',
+      style: 'width:' + pct.toFixed(0) + '%',
     }));
-    if (run.startedAt) {
-      header.appendChild(el('span', {
-        className: 'run-age',
-        text: relativeAgo(run.startedAt),
-      }));
-    }
+    header.appendChild(bar);
+    header.appendChild(el('span', { className: 'round-done', text: run.done + '/' + run.total }));
+    header.appendChild(el('span', { className: 'round-ago', text: relativeAgo(run.startedAt) }));
+    var ft = run.feederTotals;
+    header.appendChild(el('span', {
+      className: 'round-tokens',
+      text: formatTokens(ft ? ft.total_tokens : run.tokens),
+    }));
     panel.appendChild(header);
 
-    // Progress bar
-    var pct = run.total > 0 ? (run.done / run.total * 100) : 0;
-    var progressOuter = el('div', { className: 'progress-bar' });
-    var progressInner = el('div', {
-      className: 'progress-fill' + (run.fail > 0 ? ' has-fail' : ''),
-      style: 'width:' + pct.toFixed(1) + '%',
-    });
-    progressOuter.appendChild(progressInner);
-    panel.appendChild(progressOuter);
+    if (rOpen) {
+      panel.appendChild(renderWorkerTable(run));
+    }
+    return panel;
+  }
 
-    // Worker grid (2-column layout)
-    var grid = el('div', { className: 'worker-grid' });
+  /** Level 3 — the worker table for one round. */
+  function renderWorkerTable(run) {
+    var wrap = el('div', { className: 'worker-table' });
+
+    var head = el('div', { className: 'worker-thead', attrs: { 'data-key': 'thead-' + run.id } });
+    ['', 'WORKER', 'MODEL', 'TOKENS', 'LATENCY', 'SCORE', 'LAST CHECK'].forEach(function (h) {
+      head.appendChild(el('span', { text: h }));
+    });
+    wrap.appendChild(head);
+
     run.tasks.forEach(function (task, ti) {
       var key = taskKey(task, ti);
       var compositeKey = run.id + '::' + key;
       var kind = taskKind(task);
       var expanded = state.expandedWorkers.has(compositeKey);
 
-      var card = el('div', {
-        className: 'worker-card ' + kind + (expanded ? ' expanded' : ''),
+      var rowWrap = el('div', {
+        className: 'worker-rowwrap ' + kind + (expanded ? ' expanded' : ''),
         attrs: { 'data-key': 'worker-' + key },
       });
 
-      // Card header (clickable)
-      var cardHeader = el('div', {
-        className: 'worker-header',
+      var row = el('div', {
+        className: 'worker-row',
+        attrs: { role: 'button', tabindex: '0' },
         onclick: function () { toggleWorker(compositeKey); },
       });
-      cardHeader.appendChild(el('span', { className: 'worker-icon', text: kindIcon(kind) }));
-      cardHeader.appendChild(el('span', { className: 'worker-name', text: task.name || key }));
-      cardHeader.appendChild(el('span', { className: 'worker-state', text: taskStateText(kind) }));
+      row.appendChild(el('span', { className: 'w-icon ' + kind, text: kindIcon(kind) }));
+      row.appendChild(el('span', { className: 'w-name ' + (kind === 'fail' ? 'fail' : ''), text: task.name || key }));
+      row.appendChild(el('span', { className: 'w-model', text: servedModel(task, compositeKey) }));
+      row.appendChild(el('span', { className: 'w-tokens', text: task.tokens ? formatTokens(task.tokens) : '' }));
+      row.appendChild(el('span', { className: 'w-latency', text: formatLatency(taskLatency(task)) }));
+      // SCORE = the orchestrator's grade (0..1 persisted by quality_feed.py, shown /10).
+      var grade = task.quality_score;
+      var hasGrade = (typeof grade === 'number' && !isNaN(grade));
+      row.appendChild(el('span', {
+        className: 'w-score ' + (hasGrade ? (grade >= 0.7 ? 'good' : 'poor') : 'none'),
+        text: hasGrade ? (grade * 10).toFixed(1) : '—',
+        attrs: hasGrade ? { title: 'Orchestrator grade' + (task.graded_by ? ' — ' + task.graded_by : '') } : {},
+      }));
+      row.appendChild(el('span', { className: 'w-note', text: lastCheckNote(task) }));
+      rowWrap.appendChild(row);
 
-      var activity = taskActivity(task);
-      if (activity) {
-        cardHeader.appendChild(el('span', { className: 'worker-activity', text: activity }));
-      }
-      card.appendChild(cardHeader);
-
-      // Expanded detail
       if (expanded) {
-        card.appendChild(renderWorkerDetail(run, task, compositeKey));
+        rowWrap.appendChild(renderWorkerDetail(run, task, compositeKey));
       }
-
-      grid.appendChild(card);
+      wrap.appendChild(rowWrap);
     });
-    panel.appendChild(grid);
 
-    return panel;
+    return wrap;
   }
 
-  /** Icon character for task kind. */
-  function kindIcon(kind) {
-    var icons = { pass: '✓', working: '▶', retry: '↻', fail: '✗', waiting: '○' };
-    return icons[kind] || '○';
+  // ── Worker detail: BRIEF / ACTIONS / OUTPUT tabs ─────────────────────────
+
+  function currentTab(compositeKey) {
+    return state.workerTabs.get(compositeKey) || 'actions';
+  }
+
+  /** Turn epoch-ms into HH:MM:SS for the ACTIONS timeline. */
+  function turnTime(ms) {
+    if (!ms) return '';
+    var d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toTimeString().slice(0, 8);
+  }
+
+  /** One transcript turn → an ACTIONS grid row {time, role, text, cls}. */
+  function turnToRow(turn) {
+    var role = turn.role === 'orchestrator' ? 'ORCH' : 'WORKER';
+    var text = '';
+    if (turn.role === 'orchestrator') {
+      text = turn.kind === 'retry_reply'
+        ? '↩ sent it back (previous attempt failed): ' + String(turn.text || '')
+        : String(turn.text || '');
+    } else if (turn.kind === 'text') {
+      text = String(turn.text || '');
+    } else if (turn.kind === 'tool') {
+      var inp = turn.input;
+      var title = (inp && typeof inp === 'object') ? String(inp.filePath || inp.command || inp.path || inp.pattern || '') : '';
+      text = '🔧 ' + (turn.tool || 'tool') + (title ? ' · ' + title : '');
+    } else if (turn.kind === 'step') {
+      var tok = turn.tokens && turn.tokens.total ? formatTokens(turn.tokens.total) + ' tok' : '';
+      text = '· ' + (turn.reason || 'step') + (tok ? ' · ' + tok : '');
+    } else if (turn.kind === 'error') {
+      text = '⚠ ' + (turn.message || turn.name || 'error');
+    } else {
+      text = String(turn.text || '');
+    }
+    return { time: turnTime(turn.t_start), role: role, text: text, kind: turn.kind || '' };
+  }
+
+  /** Render the ACTIONS tab: transcript turns as time | ROLE | text rows. */
+  function renderActionsTab(compositeKey) {
+    var box = el('div', { className: 'wd-actions', attrs: { 'data-transcript-key': compositeKey } });
+    var transcript = state.transcripts.get(compositeKey);
+    var attempts = transcript && Array.isArray(transcript.attempts) ? transcript.attempts : [];
+    if (!attempts.length) {
+      box.appendChild(el('div', {
+        className: 'wd-empty',
+        text: transcript && transcript.status === 'error' ? 'Transcript unavailable.' : 'Waiting for the conversation…',
+      }));
+      return box;
+    }
+    attempts.forEach(function (att) {
+      if (attempts.length > 1) {
+        box.appendChild(el('div', {
+          className: 'wd-attempt-sep',
+          attrs: { 'data-outcome': att.outcome || '' },
+          text: 'ATTEMPT ' + att.n + ' · ' + (att.outcome || '') + (att.rc != null ? ' · rc=' + att.rc : ''),
+        }));
+      }
+      (att.turns || []).forEach(function (turn) {
+        var r = turnToRow(turn);
+        var rowEl = el('div', { className: 'wd-turn', attrs: { 'data-kind': r.kind } });
+        rowEl.appendChild(el('span', { className: 'wd-time', text: r.time }));
+        rowEl.appendChild(el('span', { className: 'wd-role ' + (r.role === 'ORCH' ? 'orch' : 'worker'), text: r.role }));
+        rowEl.appendChild(el('span', { className: 'wd-text', text: r.text }));
+        box.appendChild(rowEl);
+      });
+    });
+    return box;
+  }
+
+  /** Render the OUTPUT tab: check command, rc chip, output tail, file links, live log. */
+  function renderOutputTab(run, task, compositeKey) {
+    var box = el('div', { className: 'wd-output' });
+
+    var checkRow = el('div', { className: 'wd-check-row' });
+    checkRow.appendChild(el('span', { className: 'wd-label', text: 'CHECK' }));
+    checkRow.appendChild(el('span', { className: 'wd-check', text: task.check || '(no check)' }));
+    var rc = task.check_returncode;
+    var rcText = rc == null ? '—' : String(rc);
+    var rcCls = rc === 0 ? 'good' : (rc == null ? 'none' : 'bad');
+    checkRow.appendChild(el('span', { className: 'wd-rc ' + rcCls, text: 'rc=' + rcText }));
+    box.appendChild(checkRow);
+
+    var tail = task.check_output_tail;
+    var tailText = Array.isArray(tail) ? tail.join('\n') : String(tail == null ? '' : tail);
+    box.appendChild(el('pre', {
+      className: 'wd-output-block',
+      text: tailText.trim() || '(check not yet run)',
+    }));
+
+    var links = el('div', { className: 'wd-links' });
+    if (task.taskdir) {
+      links.appendChild(el('a', { text: 'open taskdir', attrs: { href: 'file://' + task.taskdir, target: '_blank', rel: 'noopener' } }));
+      links.appendChild(el('span', { className: 'wd-sep', text: ' · ' }));
+    }
+    if (task.log_path) {
+      links.appendChild(el('a', { text: 'worker.log', attrs: { href: 'file://' + task.log_path, target: '_blank', rel: 'noopener' } }));
+    }
+    if (links.childNodes.length) box.appendChild(links);
+
+    // Raw live log — escape hatch, collapsed. Seeded from the embedded tail so it is
+    // never blank (worker.log files live in /tmp and can be reaped; the run JSON keeps
+    // a tail). The live poller targets [data-log-key] and streams while running.
+    var seed = stripAnsi(task.log_tail_full || task.log_tail || '');
+    var logDetails = el('details', { className: 'wd-rawlog', attrs: { 'data-key': 'rawlog-' + compositeKey } });
+    logDetails.appendChild(el('summary', { text: 'raw worker log' }));
+    logDetails.appendChild(el('pre', {
+      className: 'worker-log',
+      attrs: { 'data-log-key': compositeKey },
+      text: seed || 'Loading log...',
+    }));
+    box.appendChild(logDetails);
+
+    return box;
+  }
+
+  /** Render expanded worker detail: tab bar + active tab panel. */
+  function renderWorkerDetail(run, task, compositeKey) {
+    var detail = el('div', { className: 'worker-detail' });
+    var tab = currentTab(compositeKey);
+
+    var tabbar = el('div', { className: 'wd-tabs' });
+    ['brief', 'actions', 'output'].forEach(function (t) {
+      tabbar.appendChild(el('button', {
+        className: 'wd-tab' + (tab === t ? ' active' : ''),
+        text: t.toUpperCase(),
+        attrs: { type: 'button', 'data-key': 'tab-' + compositeKey + '-' + t },
+        onclick: function (e) {
+          if (e && e.stopPropagation) e.stopPropagation();
+          state.workerTabs.set(compositeKey, t);
+          render();
+        },
+      }));
+    });
+    detail.appendChild(tabbar);
+
+    if (tab === 'brief') {
+      detail.appendChild(el('pre', { className: 'wd-brief', text: task.spec || task.spec_short || '(no spec recorded)' }));
+    } else if (tab === 'output') {
+      detail.appendChild(renderOutputTab(run, task, compositeKey));
+    } else {
+      detail.appendChild(renderActionsTab(compositeKey));
+    }
+
+    return detail;
+  }
+
+  /** Toggle worker expansion. */
+  function toggleWorker(compositeKey) {
+    if (state.expandedWorkers.has(compositeKey)) {
+      state.expandedWorkers.delete(compositeKey);
+    } else {
+      state.expandedWorkers.set(compositeKey, true);
+      // fetch immediately so the conversation + log show at once, not on the next poll
+      fetchExpandedTranscripts();
+      fetchExpandedWorkerLogs();
+      fetchLiveModels();
+    }
+    render();
   }
 
   // ── Live conversation (agent ↔ orchestrator transcript) ───────────────────
@@ -1102,13 +1474,16 @@
    * finished = once). This is what surfaces the actual feeder-served model on the wall even
    * for runs that were never post-run enriched (e.g. launched outside the ringer ritual). */
   function fetchLiveModels() {
-    state.expandedWorkers.forEach(function (_v, compositeKey) {
+    liveModelTargets().forEach(function (compositeKey) {
       var parts = compositeKey.split('::');
       var rid = parts[0], tkey = parts[1];
       var run = state.runs.find(function (r) { return r.id === rid; });
       if (!run) return;
       var task = run.tasks.find(function (t, ti) { return taskKey(t, ti) === tkey; });
       if (!task) return;
+      // Already resolved to a real served model → don't re-poll a finished row.
+      var have = state.liveModels.get(compositeKey);
+      if (have && have.__done) return;
       var kind = taskKind(task);
       var running = (kind === 'working' || kind === 'retry');
       var prev = state.liveModels.get(compositeKey);
@@ -1128,154 +1503,106 @@
     });
   }
 
-  function toolTitle(turn) {
-    var inp = turn.input;
-    if (inp && typeof inp === 'object') return String(inp.filePath || inp.command || inp.path || inp.pattern || '');
-    return '';
-  }
+  // ── Drawers: FEED + ARTIFACTS slide-overs ────────────────────────────────
 
-  /** Stringify a tool input/output value for display (objects → pretty JSON). */
-  function stringify(v) {
-    if (typeof v === 'string') return v;
-    try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); }
-  }
-
-  /** One conversation turn → a chat bubble. */
-  function renderTurn(turn) {
-    var wrap = el('div', { className: 'turn', attrs: { 'data-role': turn.role || '', 'data-kind': turn.kind || '' } });
-    if (turn.role === 'orchestrator') {
-      var od = el('details', { className: 'bubble orch' });
-      od.appendChild(el('summary', { text: turn.kind === 'retry_reply' ? 'Orchestrator ↩ sent it back (previous attempt failed)' : 'Orchestrator → the brief' }));
-      od.appendChild(el('pre', { text: String(turn.text || '') }));
-      wrap.appendChild(od);
-    } else if (turn.kind === 'text') {
-      wrap.appendChild(el('div', { className: 'bubble worker', text: String(turn.text || '') }));
-    } else if (turn.kind === 'tool') {
-      var td = el('details', { className: 'bubble worker tool', attrs: { 'data-tool': turn.tool || '' } });
-      var title = toolTitle(turn);
-      td.appendChild(el('summary', { text: '🔧 ' + (turn.tool || 'tool') + (title ? ' · ' + title : '') }));
-      if (turn.input != null && turn.input !== '') td.appendChild(el('pre', { text: stringify(turn.input) }));
-      if (turn.output != null && turn.output !== '') { var po = el('pre', { className: 'tool-out', text: stringify(turn.output) }); td.appendChild(po); }
-      wrap.appendChild(td);
-    } else if (turn.kind === 'step') {
-      var tok = turn.tokens && turn.tokens.total ? formatTokens(turn.tokens.total) + ' tok' : '';
-      wrap.appendChild(el('div', { className: 'turn-step', text: '· ' + (turn.reason || 'step') + (tok ? ' · ' + tok : '') }));
-    } else if (turn.kind === 'error') {
-      wrap.appendChild(el('div', { className: 'bubble worker error', text: '⚠ ' + (turn.message || turn.name || 'error') }));
-    }
-    return wrap;
-  }
-
-  /** Render the whole transcript (attempts → turns) into a container. */
-  function renderTranscript(container, transcript) {
-    var attempts = transcript && Array.isArray(transcript.attempts) ? transcript.attempts : [];
-    if (!attempts.length) {
-      container.appendChild(el('div', { className: 'turn-empty', text: transcript && transcript.status === 'error' ? 'Transcript unavailable.' : 'Waiting for the conversation…' }));
-      return;
-    }
-    attempts.forEach(function (att) {
-      if (attempts.length > 1) {
-        container.appendChild(el('div', {
-          className: 'attempt-sep',
-          attrs: { 'data-outcome': att.outcome || '' },
-          text: 'Attempt ' + att.n + ' · ' + (att.outcome || '') + (att.rc != null ? ' · rc=' + att.rc : ''),
-        }));
-      }
-      (att.turns || []).forEach(function (turn) { container.appendChild(renderTurn(turn)); });
+  /** Aggregate task events across runs for the feed drawer (+ topbar count). */
+  function collectFeedEvents() {
+    var events = [];
+    state.runs.forEach(function (run) {
+      run.tasks.forEach(function (task, ti) {
+        var kind = taskKind(task);
+        if (kind === 'waiting') return; // skip unstarted tasks
+        events.push({
+          time: parseTime(task.updatedAt || task.startedAt || run.startedAt),
+          run: run.runName || run.label,
+          task: task.name || taskKey(task, ti),
+          kind: kind,
+          text: taskStateText(kind),
+          activity: lastCheckNote(task),
+        });
+      });
     });
+    events.sort(function (a, b) { return b.time - a.time; });
+    return events.slice(0, 50);
   }
 
-  /** Render expanded worker detail: spec, LIVE CONVERSATION, raw log (collapsed), verdict. */
-  function renderWorkerDetail(run, task, compositeKey) {
-    var detail = el('div', { className: 'worker-detail' });
-
-    // Served model — the model that ACTUALLY served this task (feeder-enriched),
-    // not the routed slug (feeder/auto/*).
-    var sm = servedModel(task, compositeKey);
-    if (sm) {
-      var modelLine = el('div', { className: 'worker-model', attrs: { 'data-key': 'model-' + compositeKey } });
-      modelLine.appendChild(txt('Model: ' + sm));
-      // Orchestrator's grade (true 0..1, persisted by quality_feed.py). Blank until graded.
-      var grade = task.quality_score;
-      if (typeof grade === 'number' && !isNaN(grade)) {
-        var tier = grade >= 0.85 ? 'pass' : (grade >= 0.5 ? 'working' : 'fail');
-        modelLine.appendChild(el('span', {
-          className: 'worker-grade ' + tier,
-          text: 'Grade ' + grade.toFixed(2),
-          attrs: { title: 'Orchestrator grade (0–1)' + (task.graded_by ? ' — ' + task.graded_by : '') },
-        }));
-      }
-      detail.appendChild(modelLine);
-    }
-
-    // LIVE CONVERSATION — the agent's readable transcript with the orchestrator
-    // (the brief it was handed → its text/tool/step turns → retries). This is the
-    // main pane; fed by the /transcript route, cached in state.transcripts.
-    var convo = el('div', {
-      className: 'worker-convo',
-      attrs: { 'data-key': 'convo-' + compositeKey, 'data-transcript-key': compositeKey },
-    });
-    renderTranscript(convo, state.transcripts.get(compositeKey));
-    detail.appendChild(convo);
-
-    // Raw log — escape hatch, collapsed. Seeded from the embedded tail so it is never
-    // blank (worker.log files live in /tmp and can be reaped; the run JSON keeps a tail).
-    var seed = stripAnsi(task.log_tail_full || task.log_tail || '');
-    var logDetails = el('details', { className: 'worker-rawlog', attrs: { 'data-key': 'rawlog-' + compositeKey } });
-    logDetails.appendChild(el('summary', { text: 'Raw log' }));
-    logDetails.appendChild(el('pre', {
-      className: 'worker-log',
-      attrs: { 'data-log-key': compositeKey },
-      text: seed || 'Loading log...',
-    }));
-    detail.appendChild(logDetails);
-
-    // Verification verdict
-    if (task.verdict || task.result) {
-      var verdict = task.verdict || task.result;
-      var kind = taskKind(task);
-      detail.appendChild(el('div', {
-        className: 'worker-verdict ' + kind,
-        text: typeof verdict === 'string' ? verdict : JSON.stringify(verdict),
-        attrs: { 'data-key': 'verdict-' + compositeKey },
-      }));
-    }
-
-    return detail;
-  }
-
-  /** Toggle worker expansion. */
-  function toggleWorker(compositeKey) {
-    if (state.expandedWorkers.has(compositeKey)) {
-      state.expandedWorkers.delete(compositeKey);
+  function openDrawer(which) {
+    state.drawer = which;
+    var scrim = document.getElementById('drawer-scrim');
+    var drawer = document.getElementById('drawer');
+    var feedBody = document.getElementById('drawer-feed');
+    var artBody = document.getElementById('drawer-artifact');
+    var title = document.getElementById('drawer-title');
+    if (!drawer) return;
+    scrim.hidden = false;
+    drawer.hidden = false;
+    if (which === 'feed') {
+      title.textContent = 'ACTIVITY FEED';
+      feedBody.hidden = false;
+      artBody.hidden = true;
+      updateFeedDrawer();
     } else {
-      state.expandedWorkers.set(compositeKey, true);
-      // fetch immediately so the conversation + log show at once, not on the next poll
-      fetchExpandedTranscripts();
-      fetchExpandedWorkerLogs();
-      fetchLiveModels();
+      title.textContent = 'ARTIFACTS';
+      feedBody.hidden = true;
+      artBody.hidden = false;
+      updateArtifactDrawer();
     }
-    render();
   }
 
-  // ── Artifact Panel ───────────────────────────────────────────────────────
+  function closeDrawer() {
+    state.drawer = null;
+    var scrim = document.getElementById('drawer-scrim');
+    var drawer = document.getElementById('drawer');
+    if (scrim) scrim.hidden = true;
+    if (drawer) drawer.hidden = true;
+  }
 
-  /** Update artifact panel elements in-place (preserves glass panel structure). */
-  function updateArtifactPanel() {
+  function toggleDrawer(which) {
+    if (state.drawer === which) closeDrawer();
+    else openDrawer(which);
+  }
+
+  function updateFeedDrawer() {
+    var host = document.getElementById('drawer-feed');
+    if (!host) return;
+    var wrapper = el('div');
+    var events = state.feedEvents;
+    if (!events.length) {
+      wrapper.appendChild(el('div', { className: 'empty-state', text: 'No activity yet.', attrs: { 'data-key': 'feed-empty' } }));
+    }
+    events.forEach(function (evt, i) {
+      var card = el('div', {
+        className: 'feed-card ' + evt.kind,
+        attrs: { 'data-key': 'feed-' + i },
+      });
+      var head = el('div', { className: 'feed-card-head' });
+      head.appendChild(el('span', { className: 'feed-icon ' + evt.kind, text: kindIcon(evt.kind) }));
+      head.appendChild(el('span', { className: 'feed-job', text: evt.run }));
+      head.appendChild(el('span', { className: 'feed-verdict ' + evt.kind, text: evt.text.toUpperCase() }));
+      head.appendChild(el('span', { className: 'feed-ago', text: relativeAgo(evt.time) }));
+      card.appendChild(head);
+      card.appendChild(el('div', {
+        className: 'feed-msg',
+        text: evt.task + (evt.activity ? ' · ' + evt.activity : ''),
+      }));
+      wrapper.appendChild(card);
+    });
+    morphChildren(host, wrapper);
+  }
+
+  function updateArtifactDrawer() {
     var picker = document.getElementById('artifact-picker');
     var versionPicker = document.getElementById('artifact-version');
     var preview = document.getElementById('artifact-preview');
-    var status = document.getElementById('artifact-status');
+    var openLink = document.getElementById('artifact-open');
     if (!picker) return;
 
     // Populate artifact picker
-    var currentVal = picker.value;
     picker.innerHTML = '';
     var defaultOpt = document.createElement('option');
     defaultOpt.value = '';
-    defaultOpt.textContent = state.artifacts.length ? '-- Select --' : 'No artifacts';
+    defaultOpt.textContent = state.artifacts.length ? '-- Select artifact --' : 'No artifacts';
     picker.appendChild(defaultOpt);
-
     state.artifacts.forEach(function (art) {
       var opt = document.createElement('option');
       opt.value = art.name;
@@ -1283,126 +1610,67 @@
       if (art.name === state.selectedArtifact) opt.selected = true;
       picker.appendChild(opt);
     });
-
-    // Restore selection
     if (state.selectedArtifact) picker.value = state.selectedArtifact;
 
-    if (status) {
-      status.textContent = state.artifacts.length + ' artifact' + (state.artifacts.length !== 1 ? 's' : '');
-    }
-
-    // Update preview
     var selected = state.artifacts.find(function (a) { return a.name === state.selectedArtifact; });
+
+    // Version picker (latest first)
+    versionPicker.innerHTML = '';
+    var versions = selected && Array.isArray(selected.versions) ? selected.versions : [];
+    versions.slice().reverse().forEach(function (v, ri) {
+      var vi = versions.length - 1 - ri; // original index
+      var opt = document.createElement('option');
+      opt.value = String(vi);
+      opt.textContent = 'v' + (vi + 1) + (vi === versions.length - 1 ? ' (latest)' : '');
+      versionPicker.appendChild(opt);
+    });
+    var selIdx = state.artifactVersion !== '' ? Number(state.artifactVersion) : versions.length - 1;
+    if (versions.length) versionPicker.value = String(Math.min(Math.max(selIdx, 0), versions.length - 1));
+
+    var ver = versions.length ? versions[Math.min(Math.max(selIdx, 0), versions.length - 1)] : null;
     if (preview) {
-      if (selected && selected.versions && selected.versions.length > 0) {
-        var ver = selected.versions[selected.versions.length - 1];
-        if (ver && ver.url) {
-          preview.innerHTML = '<iframe src="' + ver.url + '" sandbox="allow-scripts allow-same-origin" style="width:100%;height:200px;border:none;border-radius:var(--radius-sm);"></iframe>';
-        } else {
-          preview.innerHTML = '<span style="color:var(--muted);">No preview available</span>';
+      if (ver && ver.url) {
+        var have = preview.querySelector('iframe');
+        if (!have || have.getAttribute('src') !== ver.url) {
+          preview.innerHTML = '<iframe src="' + ver.url + '" sandbox="allow-scripts allow-same-origin"></iframe>';
         }
+      } else if (selected) {
+        preview.innerHTML = '<span>No preview available</span>';
       } else {
-        preview.innerHTML = '<span style="color:var(--muted);">Select an artifact to preview</span>';
+        preview.innerHTML = '<span>Select an artifact to preview</span>';
       }
     }
+    if (openLink) {
+      if (ver && ver.url) { openLink.hidden = false; openLink.href = ver.url; }
+      else openLink.hidden = true;
+    }
 
-    // Wire up change listener (only once)
     if (!picker._wired) {
       picker._wired = true;
       picker.addEventListener('change', function (e) {
         state.selectedArtifact = e.target.value;
-        render();
+        state.artifactVersion = '';
+        updateArtifactDrawer();
+      });
+      versionPicker.addEventListener('change', function (e) {
+        state.artifactVersion = e.target.value;
+        updateArtifactDrawer();
       });
     }
   }
 
-  // ── Activity Feed ────────────────────────────────────────────────────────
-
-  function renderActivityFeed() {
-    var wrapper = el('div');
-    var events = [];
-
-    // Aggregate events from all runs
-    state.runs.forEach(function (run) {
-      run.tasks.forEach(function (task, ti) {
-        var kind = taskKind(task);
-        if (kind === 'waiting') return; // skip unstarted tasks
-
-        events.push({
-          time: parseTime(task.updatedAt || task.startedAt || run.startedAt),
-          run: run.label,
-          task: task.name || taskKey(task, ti),
-          kind: kind,
-          text: taskStateText(kind),
-          activity: taskActivity(task),
-        });
-      });
+  function setupDrawers() {
+    var feedBtn = document.getElementById('feed-btn');
+    var artBtn = document.getElementById('artifacts-btn');
+    var closeBtn = document.getElementById('drawer-close');
+    var scrim = document.getElementById('drawer-scrim');
+    if (feedBtn) feedBtn.addEventListener('click', function () { toggleDrawer('feed'); });
+    if (artBtn) artBtn.addEventListener('click', function () { toggleDrawer('artifact'); });
+    if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
+    if (scrim) scrim.addEventListener('click', closeDrawer);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && state.drawer) closeDrawer();
     });
-
-    // Sort newest first
-    events.sort(function (a, b) { return b.time - a.time; });
-
-    // Limit to 50 recent events
-    events = events.slice(0, 50);
-
-    if (events.length === 0) {
-      wrapper.appendChild(el('div', {
-        className: 'empty-state',
-        text: 'No activity yet.',
-        attrs: { 'data-key': 'empty-feed' },
-      }));
-      return wrapper;
-    }
-
-    events.forEach(function (evt, i) {
-      var row = el('div', {
-        className: 'feed-item ' + evt.kind,
-        attrs: { 'data-key': 'feed-' + i },
-      });
-      row.appendChild(el('span', { className: 'feed-time', text: relativeAgo(evt.time) }));
-      row.appendChild(el('span', { className: 'feed-icon', text: kindIcon(evt.kind) }));
-      row.appendChild(el('span', { className: 'feed-run', text: evt.run }));
-      row.appendChild(el('span', { className: 'feed-task', text: evt.task }));
-      row.appendChild(el('span', { className: 'feed-text', text: evt.text }));
-      if (evt.activity) {
-        row.appendChild(el('span', { className: 'feed-activity', text: evt.activity }));
-      }
-      wrapper.appendChild(row);
-    });
-
-    return wrapper;
-  }
-
-  // ── Bottom Bar ───────────────────────────────────────────────────────────
-
-  function renderBottomBar() {
-    var wrapper = el('div');
-
-    // "All" pill
-    var allPill = el('button', {
-      className: 'run-pill' + (state.selectedRun === '' ? ' active' : ''),
-      text: 'All',
-      attrs: { 'data-key': 'pill-all' },
-      onclick: function () { state.selectedRun = ''; render(); },
-    });
-    wrapper.appendChild(allPill);
-
-    // One pill per run
-    state.runs.forEach(function (run) {
-      var pill = el('button', {
-        className: 'run-pill' + (state.selectedRun === run.id ? ' active' : '') +
-                   (run.isLive ? ' live' : ''),
-        text: run.label,
-        attrs: { 'data-key': 'pill-' + run.id },
-        onclick: function () {
-          state.selectedRun = (state.selectedRun === run.id) ? '' : run.id;
-          render();
-        },
-      });
-      wrapper.appendChild(pill);
-    });
-
-    return wrapper;
   }
 
   // ── Analytics ────────────────────────────────────────────────────────────
@@ -1467,11 +1735,11 @@
       text: t === 'h4' ? '#00ff41' : t === 'light' ? '#333' : '#c5ccd6',
       grid: t === 'h4' ? 'rgba(0,255,65,0.08)' : t === 'light' ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)',
       accent: t === 'h4' ? '#00ff41' : '#35d0ff',
-      pass: '#2ee89a',
-      fail: '#ff4f6e',
-      working: '#f5b731',
+      pass: t === 'h4' ? '#00ff41' : '#2ee89a',
+      fail: t === 'h4' ? '#ff1744' : '#ff4f6e',
+      working: t === 'h4' ? '#ffea00' : '#f5b731',
       palette: t === 'h4'
-        ? ['#00ff41', '#00cc33', '#33ff66', '#66ff99', '#00ff88', '#00e650']
+        ? ['#00ff41', '#ff2fd2', '#ffea00', '#a8f0b8', '#0a7d2b', '#00e650']
         : ['#35d0ff', '#2ee89a', '#f5b731', '#ff4f6e', '#a78bfa', '#f472b6'],
     };
   }
@@ -1483,77 +1751,148 @@
     });
   }
 
-  // ── Models page: best-model-per-class finder (from feeder /api/canon) ──────
-  var WIRE_CLASSES = ['coding', 'reasoning', 'creative_writing', 'instruction_following', 'long_query', 'multi_turn'];
+  /** Average orchestrator grade (0..1) per served model, computed from run JSONs. */
+  function gradesByServedModel() {
+    var acc = {}; // model → { sum, n }
+    state.runs.forEach(function (run) {
+      run.tasks.forEach(function (task) {
+        if (typeof task.quality_score !== 'number' || isNaN(task.quality_score)) return;
+        var m = servedModel(task, null);
+        if (!m) return;
+        if (!acc[m]) acc[m] = { sum: 0, n: 0 };
+        acc[m].sum += task.quality_score;
+        acc[m].n++;
+      });
+    });
+    var out = {};
+    Object.keys(acc).forEach(function (m) { out[m] = acc[m].sum / acc[m].n; });
+    return out;
+  }
+
+  /** All orchestrator grades across runs (for the analytics KPI). */
+  function allGrades() {
+    var grades = [];
+    state.runs.forEach(function (run) {
+      run.tasks.forEach(function (task) {
+        if (typeof task.quality_score === 'number' && !isNaN(task.quality_score)) grades.push(task.quality_score);
+      });
+    });
+    return grades;
+  }
+
+  // ── Models page: wire-class scoreboard ─────────────────────────────────────
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
   }
-  function fmtCtx(n) { n = Number(n) || 0; return n >= 1000 ? Math.round(n / 1000) + 'k' : String(n); }
 
-  function canonClassScore(m, cls) {
-    var ts = m.taskScores || [];
-    for (var i = 0; i < ts.length; i++) if (ts[i].task_type === cls) return ts[i];
-    return null;
-  }
-  function primaryInstance(m) {
-    var ins = m.instances || [];
-    var enabled = ins.filter(function (x) { return x.enabled; });
-    return enabled[0] || ins[0] || {};
-  }
-  function bestForClass(cls) {
-    return (state.canon || []).map(function (m) {
-      var s = canonClassScore(m, cls);
-      var pi = primaryInstance(m);
-      return {
-        name: m.name || m.slug || 'unknown',
-        score: s ? s.score : null,
-        source: s ? s.source : null,
-        platform: pi.platform || '',
-        platforms: (m.instances || []).length,
-        cost: pi.cost_tier || '',
-        speedRank: pi.speed_rank,
-        intelRank: pi.intelligence_rank,
-        health: pi.health_status || '',
-        context: pi.context_window,
-        enabled: (m.instances || []).some(function (x) { return x.enabled; }),
-      };
-    }).filter(function (r) { return r.score != null && r.enabled; })
-      .sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
+  // Reserved fixture names (docs/TAXONOMY.md) — excluded from every ranking.
+  var FIXTURE_RE = /^(mock-|proven-|fixture|test-model)/i;
+
+  /** Derive a display lab from a served-model slug. Unverified → shown with "?". */
+  function labFromServed(served) {
+    var parts = String(served || '').split('/');
+    // platform/author/model → author; platform/model → platform
+    var lab = parts.length >= 3 ? parts[1] : (parts[0] || '');
+    var known = {
+      'moonshotai': 'Moonshot AI', 'mistralai': 'Mistral AI', 'nvidia': 'NVIDIA',
+      'deepseek-ai': 'DeepSeek', 'deepseek': 'DeepSeek', 'openai': 'OpenAI',
+      'meta-llama': 'Meta', 'qwen': 'Alibaba', 'z-ai': 'Z.ai', 'zai-org': 'Z.ai',
+      'google': 'Google', 'anthropic': 'Anthropic', 'x-ai': 'xAI', 'poolside': 'Poolside',
+    };
+    var key = lab.toLowerCase();
+    return known[key] || (lab ? lab + ' ?' : '?');
   }
 
   function renderModelsPage() {
     var host = document.getElementById('models-content');
     if (!host) return;
-    var cls = state.modelsClass || 'coding';
-    var rows = bestForClass(cls);
-    var chips = WIRE_CLASSES.map(function (c) {
-      return '<button class="class-chip' + (c === cls ? ' active' : '') + '" data-class="' + c + '">' + esc(c.replace(/_/g, ' ')) + '</button>';
+
+    var usage = (state.usage || []).filter(function (u) {
+      var name = String(u.served_model || '').split('/').pop();
+      return !FIXTURE_RE.test(name) && !FIXTURE_RE.test(u.served_model || '');
+    });
+
+    // Classes actually present in the eval log (never hardcoded).
+    var classes = [];
+    usage.forEach(function (u) {
+      if (u.task_class && classes.indexOf(u.task_class) < 0) classes.push(u.task_class);
+    });
+    classes.sort();
+
+    var cls = state.modelsClass || 'all';
+    var chips = ['all'].concat(classes).map(function (c) {
+      var label = c === 'all' ? 'ALL' : c.replace(/_/g, ' ').toUpperCase();
+      return '<button class="class-chip' + (c === cls ? ' active' : '') + '" data-class="' + esc(c) + '" type="button">' + esc(label) + '</button>';
     }).join('');
-    var html = '<div class="models-classbar">' + chips + '</div>';
+
+    // Aggregate rows for the selected class ('all' = merge across classes per model).
+    var rowsByModel = {};
+    usage.forEach(function (u) {
+      if (cls !== 'all' && u.task_class !== cls) return;
+      var m = u.served_model;
+      if (!rowsByModel[m]) rowsByModel[m] = { model: m, tasks: 0, passes: 0, firstTry: 0, tokens: 0 };
+      rowsByModel[m].tasks += numberOrZero(u.tasks);
+      rowsByModel[m].passes += numberOrZero(u.passes);
+      rowsByModel[m].firstTry += numberOrZero(u.first_try);
+      rowsByModel[m].tokens += numberOrZero(u.tokens);
+    });
+    var grades = gradesByServedModel();
+    var rows = Object.keys(rowsByModel).map(function (m) {
+      var r = rowsByModel[m];
+      var grade = grades[m]; // 0..1 or undefined
+      return {
+        model: m,
+        lab: labFromServed(m),
+        harness: 'OpenCode',
+        runs: r.tasks,
+        pass: r.passes,
+        fail: r.tasks - r.passes,
+        firstTry: r.tasks ? (r.firstTry / r.tasks * 100) : 0,
+        score: (typeof grade === 'number') ? grade * 10 : null,
+        sortScore: (typeof grade === 'number') ? grade * 10 : (r.tasks ? (r.passes / r.tasks) * 10 : 0),
+        latency: servedLatency(m),
+        tokTask: r.tasks ? r.tokens / r.tasks : 0,
+      };
+    });
+    rows.sort(function (a, b) { return b.sortScore - a.sortScore; });
+
+    var html = '<div class="class-chips">' +
+      '<span class="class-chips-label">Prompt type</span>' + chips + '</div>';
+
     if (!rows.length) {
-      html += '<p class="turn-empty">No feeder catalog yet — is feeder up on :3001?</p>';
+      html += '<div class="glass score-table"><div class="score-empty">No runs logged for this prompt type yet.</div></div>';
     } else {
-      html += '<div class="models-hint">Best models for <strong>' + esc(cls.replace(/_/g, ' ')) + '</strong>, ranked by feeder score (◉ = includes Ringer\'s graded runs).</div>';
-      html += '<table class="models-table"><thead><tr><th>#</th><th>Model</th><th>Score</th><th>Platform</th><th>Cost</th><th>Speed</th><th>Intel</th><th>Context</th><th>Health</th></tr></thead><tbody>';
+      html += '<div class="glass score-table"><div class="table-scroll">';
+      html += '<div class="score-grid score-grid-head">' +
+        '<span>RANK</span><span>MODEL</span><span>LAB</span><span>HARNESS</span><span>RUNS</span>' +
+        '<span>PASS</span><span>FIRST-TRY</span><span>AVG SCORE</span><span>LATENCY</span><span>TOK/TASK</span></div>';
       rows.forEach(function (r, i) {
-        var live = r.source === 'realtime_quality' ? ' <span class="src-badge" title="score includes Ringer graded runs">◉</span>' : '';
-        html += '<tr>' +
-          '<td class="rank">' + (i + 1) + '</td>' +
-          '<td><strong>' + esc(r.name) + '</strong>' + live + '</td>' +
-          '<td class="score">' + (r.score != null ? Math.round(r.score * 100) + '%' : '—') + '</td>' +
-          '<td>' + esc(r.platform) + (r.platforms > 1 ? ' <span class="muted">+' + (r.platforms - 1) + '</span>' : '') + '</td>' +
-          '<td>' + esc(r.cost || '—') + '</td>' +
-          '<td>' + (r.speedRank != null && r.speedRank < 500 ? '#' + r.speedRank : '—') + '</td>' +
-          '<td>' + (r.intelRank != null && r.intelRank < 500 ? '#' + r.intelRank : '—') + '</td>' +
-          '<td>' + (r.context ? fmtCtx(r.context) : '—') + '</td>' +
-          '<td class="health health-' + esc(r.health) + '">' + esc(r.health || '—') + '</td>' +
-          '</tr>';
+        var scoreTxt = r.score != null ? r.score.toFixed(1) : '—';
+        var scoreCls = r.score == null ? 'none' : (r.score >= 8 ? 'good' : r.score >= 6.5 ? 'ok' : 'poor');
+        var scorePct = r.score != null ? Math.min(100, r.score * 10).toFixed(0) : '0';
+        html += '<div class="score-grid score-grid-row' + (i === 0 ? ' top' : '') + '">' +
+          '<span class="sc-rank' + (i === 0 ? ' top' : '') + '">#' + (i + 1) + '</span>' +
+          '<span class="sc-model">' + esc(r.model) + '</span>' +
+          '<span class="sc-lab">' + esc(r.lab) + '</span>' +
+          '<span class="sc-harness">' + esc(r.harness) + '</span>' +
+          '<span>' + r.runs + '</span>' +
+          '<span><span class="sc-pass">' + r.pass + '</span><span class="sc-slash">/</span><span class="sc-fail">' + r.fail + '</span></span>' +
+          '<span>' + r.firstTry.toFixed(0) + '%</span>' +
+          '<span class="sc-score-cell"><span class="sc-score ' + scoreCls + '">' + scoreTxt + '</span>' +
+            '<span class="sc-score-bar"><span class="' + scoreCls + '" style="width:' + scorePct + '%"></span></span></span>' +
+          '<span>' + (r.latency ? formatLatency(r.latency) : '—') + '</span>' +
+          '<span>' + (r.tokTask ? formatTokens(r.tokTask) : '—') + '</span>' +
+          '</div>';
       });
-      html += '</tbody></table>';
+      html += '</div></div>';
     }
+    html += '<div class="score-footnote">Lab &ne; harness &ne; plan (docs/TAXONOMY.md). Labs derived from the served slug show with ? until identity is verified. ' +
+      'Reserved fixture names (proven-model, mock-model, &hellip;) are excluded from every ranking. ' +
+      'AVG SCORE is the orchestrator’s grade (&mdash; until a run is graded); rank falls back to pass rate when ungraded.</div>';
+
     host.innerHTML = html;
     host.querySelectorAll('.class-chip').forEach(function (b) {
       b.addEventListener('click', function () { state.modelsClass = b.dataset.class; renderModelsPage(); });
@@ -1573,27 +1912,30 @@
 
     // --- Aggregate data ---
     var uniqueModels = [];
-    var modelMap = {};  // model -> { quality[], pass[], latency[], requests }
+    var modelMap = {};  // model -> { quality[], pass[], latency[], requests, tokens }
     var taskClassCounts = {};
-    var totalRequests = 0;
+    var totalRequests = 0, totalTokens = 0, totalFirstTry = 0;
 
     models.forEach(function (m) {
       var name = m.model || m.model_id || m.name || 'unknown';
       var tc = m.task_class || 'unknown';
       if (!modelMap[name]) {
-        modelMap[name] = { quality: [], pass: [], latency: [], requests: 0 };
+        modelMap[name] = { quality: [], pass: [], latency: [], requests: 0, tokens: 0 };
         uniqueModels.push(name);
       }
       modelMap[name].quality.push(numberOrZero(m.quality));
       modelMap[name].pass.push(numberOrZero(m.first_try_pass));
       modelMap[name].latency.push(numberOrZero(m.latency));
       modelMap[name].requests += numberOrZero(m.requests);
+      modelMap[name].tokens += numberOrZero(m.tokens);
       totalRequests += numberOrZero(m.requests);
+      totalTokens += numberOrZero(m.tokens);
+      totalFirstTry += numberOrZero(m.first_try_pass) * numberOrZero(m.requests);
       taskClassCounts[tc] = (taskClassCounts[tc] || 0) + numberOrZero(m.requests);
     });
 
     // Compute averages per model
-    var avgQuality = [], avgPass = [], avgLatency = [], reqCounts = [];
+    var avgQuality = [], avgPass = [], avgLatency = [], reqCounts = [], tokPerTask = [];
     uniqueModels.forEach(function (name) {
       var d = modelMap[name];
       var avg = function (arr) { return arr.reduce(function (a, b) { return a + b; }, 0) / arr.length; };
@@ -1601,29 +1943,28 @@
       avgPass.push(+(avg(d.pass) * 100).toFixed(1));
       avgLatency.push(+avg(d.latency).toFixed(0));
       reqCounts.push(d.requests);
+      tokPerTask.push(d.requests ? Math.round(d.tokens / d.requests) : 0);
     });
 
-    // Best model by quality
-    var bestQualIdx = avgQuality.indexOf(Math.max.apply(null, avgQuality));
-    var bestLatIdx = avgLatency.indexOf(Math.min.apply(null, avgLatency));
-    var bestPassIdx = avgPass.indexOf(Math.max.apply(null, avgPass));
-
-    // --- Summary KPIs ---
+    // --- Summary KPIs (per handoff §7: runs, first-try, avg orch score, avg tok/task) ---
     var summaryEl = document.getElementById('analytics-summary');
     if (summaryEl) {
       summaryEl.innerHTML = '';
+      var jobsCount = groupJobs().length;
+      var grades = allGrades();
+      var avgGrade = grades.length ? (grades.reduce(function (a, b) { return a + b; }, 0) / grades.length) * 10 : null;
       var kpis = [
-        { label: 'Total Models', value: String(uniqueModels.length), sub: models.length + ' model-task combos' },
-        { label: 'Total Requests', value: formatTokens(totalRequests), sub: Object.keys(taskClassCounts).length + ' task classes' },
-        { label: 'Best Quality', value: avgQuality[bestQualIdx] + '%', sub: uniqueModels[bestQualIdx] },
-        { label: 'Best Pass Rate', value: avgPass[bestPassIdx] + '%', sub: uniqueModels[bestPassIdx] },
+        { label: 'Total Runs', value: String(state.runs.length || totalRequests), sub: jobsCount + ' jobs' },
+        { label: 'First-Try Pass', value: totalRequests ? (totalFirstTry / totalRequests * 100).toFixed(0) + '%' : '—', sub: 'all models' },
+        { label: 'Avg Orch Score', value: avgGrade != null ? avgGrade.toFixed(1) : '—', sub: avgGrade != null ? 'of 10 · ' + grades.length + ' graded' : 'no graded runs yet' },
+        { label: 'Avg Tok/Task', value: totalRequests ? formatTokens(totalTokens / totalRequests) : '—', sub: 'weighted' },
       ];
       kpis.forEach(function (k) {
         var card = document.createElement('div');
         card.className = 'analytics-kpi';
-        card.innerHTML = '<div class="ak-value">' + k.value + '</div>' +
-          '<div class="ak-label">' + k.label + '</div>' +
-          '<div class="ak-sub">' + k.sub + '</div>';
+        card.innerHTML = '<div class="ak-label">' + k.label + '</div>' +
+          '<div class="ak-line"><span class="ak-value">' + k.value + '</span>' +
+          '<span class="ak-sub">' + k.sub + '</span></div>';
         summaryEl.appendChild(card);
       });
     }
@@ -1654,7 +1995,7 @@
             label: 'Avg Quality %',
             data: avgQuality,
             backgroundColor: C.palette.slice(0, uniqueModels.length),
-            borderRadius: 4,
+            borderRadius: 2,
             borderSkipped: false,
           }],
         },
@@ -1682,7 +2023,7 @@
             backgroundColor: avgPass.map(function (v) {
               return v >= 80 ? C.pass : v >= 60 ? C.working : C.fail;
             }),
-            borderRadius: 4,
+            borderRadius: 2,
             borderSkipped: false,
           }],
         },
@@ -1710,7 +2051,7 @@
             backgroundColor: avgLatency.map(function (v) {
               return v <= 2000 ? C.pass : v <= 3500 ? C.working : C.fail;
             }),
-            borderRadius: 4,
+            borderRadius: 2,
             borderSkipped: false,
           }],
         },
@@ -1737,7 +2078,7 @@
             label: 'Requests',
             data: reqCounts,
             backgroundColor: C.accent,
-            borderRadius: 4,
+            borderRadius: 2,
             borderSkipped: false,
           }],
         },
@@ -1776,10 +2117,10 @@
       });
     }
 
-    // --- Chart 6: Radar Comparison ---
+    // --- Chart 6: Radar Comparison (top 3 models) ---
     var ctx6 = document.getElementById('chart-radar');
     if (ctx6) {
-      var radarDatasets = uniqueModels.slice(0, 4).map(function (name, idx) {
+      var radarDatasets = uniqueModels.slice(0, 3).map(function (name, idx) {
         var d = modelMap[name];
         var avg = function (arr) { return arr.reduce(function (a, b) { return a + b; }, 0) / arr.length; };
         return {
@@ -1791,9 +2132,9 @@
             +(d.requests / (totalRequests / uniqueModels.length) * 50).toFixed(0),  // normalized volume
           ],
           borderColor: C.palette[idx],
-          backgroundColor: C.palette[idx].replace(')', ',0.1)').replace('rgb', 'rgba'),
-          borderWidth: 2,
-          pointRadius: 3,
+          backgroundColor: 'transparent',
+          borderWidth: 1.5,
+          pointRadius: 2,
         };
       });
       analyticsCharts.radar = new Chart(ctx6, {
@@ -1861,20 +2202,20 @@
     if (tableEl) {
       var html = '<table class="models-table"><thead><tr>' +
         '<th>Model</th><th>Task Class</th><th>Quality</th><th>Latency</th>' +
-        '<th>Requests</th><th>First-Try Pass</th><th>Efficiency</th></tr></thead><tbody>';
+        '<th>Requests</th><th>First-Try Pass</th><th>Tok/Task</th></tr></thead><tbody>';
       models.forEach(function (m) {
         var q = numberOrZero(m.quality);
         var p = numberOrZero(m.first_try_pass);
         var lat = numberOrZero(m.latency);
-        var eff = lat > 0 ? (q * 1000 / lat).toFixed(2) : '-';
+        var tpt = m.requests ? numberOrZero(m.tokens) / m.requests : 0;
         var passClass = p >= 0.8 ? 'pass' : p >= 0.6 ? 'working' : 'fail';
-        html += '<tr><td><strong>' + (m.model || m.model_id || '-') + '</strong></td>' +
-          '<td>' + (m.task_class || '-') + '</td>' +
+        html += '<tr><td><strong>' + esc(m.model || m.model_id || '-') + '</strong></td>' +
+          '<td>' + esc(m.task_class || '-') + '</td>' +
           '<td>' + (q * 100).toFixed(0) + '%</td>' +
-          '<td>' + lat.toFixed(0) + 'ms</td>' +
+          '<td>' + (lat ? formatLatency(lat) : '—') + '</td>' +
           '<td>' + (m.requests || 0) + '</td>' +
           '<td class="text-' + passClass + '" style="font-weight:600;">' + (p * 100).toFixed(0) + '%</td>' +
-          '<td>' + eff + '</td></tr>';
+          '<td>' + (tpt ? formatTokens(tpt) : '—') + '</td></tr>';
       });
       html += '</tbody></table>';
       tableEl.innerHTML = html;
@@ -1883,7 +2224,7 @@
 
   // ── Navigation ───────────────────────────────────────────────────────────
 
-  /** Navigate to a page: 'dashboard' | 'analytics' | 'models'. */
+  /** Navigate to a page: 'dashboard' | 'analytics' | 'models' | 'queue' | 'settings'. */
   function navigateTo(page) {
     state.currentPage = page;
 
@@ -1940,6 +2281,8 @@
     });
   }
 
+  // ── Theme Designer ───────────────────────────────────────────────────────
+
   function hexToRgba(hex, alpha) {
     var value = String(hex || '#06090f').replace('#', '');
     if (value.length === 3) value = value.split('').map(function (c) { return c + c; }).join('');
@@ -1952,8 +2295,11 @@
   }
 
   function applyDesigner(settings) {
+    if (settings && settings.rain != null) state.rainIntensity = numberOrZero(settings.rain);
     var root = document.documentElement;
-    if (!settings || !settings.background) return;
+    // Colour overrides only when the human actually customised colours —
+    // a rain-only tweak must not repaint the current theme's panels.
+    if (!settings || !settings.custom || !settings.background) return;
     root.style.setProperty('--ground', settings.background);
     root.style.setProperty('--surface', settings.base === 'white' ? '#ffffff' : settings.base === 'grey' ? '#242830' : '#070707');
     root.style.setProperty('--accent', settings.accent);
@@ -1964,16 +2310,103 @@
   }
 
   function setupThemeDesigner() {
-    var base = document.getElementById('designer-base'), accent = document.getElementById('designer-accent'), background = document.getElementById('designer-background'), overlay = document.getElementById('designer-overlay'), value = document.getElementById('designer-overlay-value');
-    if (!base || !accent || !background || !overlay) return;
+    var baseGroup = document.getElementById('designer-base');
+    var swatches = document.getElementById('designer-swatches');
+    var accent = document.getElementById('designer-accent');
+    var background = document.getElementById('designer-background');
+    var overlay = document.getElementById('designer-overlay');
+    var overlayVal = document.getElementById('designer-overlay-value');
+    var rain = document.getElementById('designer-rain');
+    var rainVal = document.getElementById('designer-rain-value');
+    var dropzone = document.getElementById('designer-dropzone');
+    var upload = document.getElementById('designer-upload');
+    if (!baseGroup || !accent || !background || !overlay || !rain) return;
+
     var settings = loadDesigner();
-    ['base', 'accent', 'background', 'overlay'].forEach(function (key) { if (settings[key]) ({ base: base, accent: accent, background: background, overlay: overlay })[key].value = settings[key]; });
+    if (settings.accent) accent.value = settings.accent;
+    if (settings.background) background.value = settings.background;
+    if (settings.overlay != null) overlay.value = settings.overlay;
+    if (settings.rain != null) rain.value = settings.rain;
     applyDesigner(settings);
-    function save() { settings = { base: base.value, accent: accent.value, background: background.value, overlay: overlay.value, image: settings.image || '' }; value.textContent = overlay.value + '%'; localStorage.setItem('ringside-custom-theme', JSON.stringify(settings)); applyDesigner(settings); }
-    [base, accent, background, overlay].forEach(function (el) { el.addEventListener('input', save); el.addEventListener('change', save); });
-    document.getElementById('designer-upload').addEventListener('change', function (e) { var file = e.target.files && e.target.files[0]; if (!file) return; var reader = new FileReader(); reader.onload = function () { settings.image = reader.result; save(); }; reader.readAsDataURL(file); });
-    document.getElementById('designer-clear-image').addEventListener('click', function () { settings.image = ''; save(); });
-    document.getElementById('theme-reset').addEventListener('click', function () { localStorage.removeItem('ringside-custom-theme'); document.documentElement.removeAttribute('style'); base.value = 'dark'; accent.value = '#35d0ff'; background.value = '#06090f'; overlay.value = 55; value.textContent = '55%'; });
+    syncUI();
+
+    function syncUI() {
+      overlayVal.textContent = overlay.value + '%';
+      rainVal.textContent = rain.value + '%';
+      baseGroup.querySelectorAll('[data-base]').forEach(function (b) {
+        b.classList.toggle('active', (settings.base || 'dark') === b.dataset.base);
+      });
+      if (swatches) swatches.querySelectorAll('.swatch').forEach(function (s) {
+        s.classList.toggle('active', (settings.accent || '').toLowerCase() === s.dataset.accent);
+      });
+    }
+
+    function save(colorTouched) {
+      settings = {
+        base: settings.base || 'dark',
+        accent: accent.value,
+        background: background.value,
+        overlay: overlay.value,
+        rain: rain.value,
+        image: settings.image || '',
+        // once colours are customised they stay customised until reset
+        custom: !!(settings.custom || colorTouched === true),
+      };
+      localStorage.setItem('ringside-custom-theme', JSON.stringify(settings));
+      applyDesigner(settings);
+      applyRainIntensity(rain.value);
+      syncUI();
+    }
+
+    baseGroup.querySelectorAll('[data-base]').forEach(function (b) {
+      b.addEventListener('click', function () { settings.base = b.dataset.base; save(true); });
+    });
+    if (swatches) swatches.querySelectorAll('.swatch').forEach(function (s) {
+      s.addEventListener('click', function () { accent.value = s.dataset.accent; save(true); });
+    });
+    var saveColor = function () { save(true); };
+    var saveRain = function () { save(false); };
+    [accent, background, overlay].forEach(function (input) {
+      input.addEventListener('input', saveColor);
+      input.addEventListener('change', saveColor);
+    });
+    rain.addEventListener('input', saveRain);
+    rain.addEventListener('change', saveRain);
+
+    // Background image: dashed drop-zone (click or drop)
+    function readImage(file) {
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () { settings.image = reader.result; save(true); };
+      reader.readAsDataURL(file);
+    }
+    if (dropzone && upload) {
+      dropzone.addEventListener('click', function () { upload.click(); });
+      dropzone.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); upload.click(); } });
+      dropzone.addEventListener('dragover', function (e) { e.preventDefault(); dropzone.classList.add('over'); });
+      dropzone.addEventListener('dragleave', function () { dropzone.classList.remove('over'); });
+      dropzone.addEventListener('drop', function (e) {
+        e.preventDefault();
+        dropzone.classList.remove('over');
+        readImage(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+      });
+      upload.addEventListener('change', function (e) { readImage(e.target.files && e.target.files[0]); });
+    }
+    var clearBtn = document.getElementById('designer-clear-image');
+    if (clearBtn) clearBtn.addEventListener('click', function () { settings.image = ''; save(true); });
+
+    var reset = document.getElementById('theme-reset');
+    if (reset) reset.addEventListener('click', function () {
+      localStorage.removeItem('ringside-custom-theme');
+      document.documentElement.removeAttribute('style');
+      settings = {};
+      accent.value = '#35d0ff';
+      background.value = '#06090f';
+      overlay.value = 55;
+      rain.value = 28;
+      applyRainIntensity(28);
+      syncUI();
+    });
   }
 
   // ── Kirby Easter Egg ─────────────────────────────────────────────────────
@@ -2105,8 +2538,10 @@
   // ── Init ─────────────────────────────────────────────────────────────────
 
   function init() {
+    var designer = loadDesigner();
+    if (designer.rain != null) state.rainIntensity = numberOrZero(designer.rain);
     setTheme(state.theme);
-    applyDesigner(loadDesigner());
+    applyDesigner(designer);
     tickClock();
     setInterval(tickClock, 1000);
     setInterval(fetchRuns, 1000);
@@ -2115,6 +2550,7 @@
     // without a modal open, which would otherwise be clobbered mid-edit).
     setInterval(function () { if (state.currentPage === 'queue' && state.queue.mode === null) fetchQueue(); }, 2500);
     setupQueue();
+    setupDrawers();
     if (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) {
       window.__TAURI__.core.invoke('hud_endpoint').then(function (endpoint) { state.apiBase = endpoint; fetchRuns(); fetchLibrary(); }).catch(function () { fetchRuns(); fetchLibrary(); });
     } else { fetchRuns(); fetchLibrary(); }
