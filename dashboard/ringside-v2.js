@@ -302,16 +302,33 @@
     state.feedEvents = collectFeedEvents();
   }
 
+  /**
+   * Server serves artifact files at /artifacts/<path-relative-to-the-artifact-root>.
+   * The library payload only carries absolute filesystem paths, so derive the
+   * served URL here — everything under the root sits after the last '/artifacts/'
+   * segment. Prefer the rendered report over the raw snapshot.
+   */
+  function artifactUrl(absPath) {
+    if (!absPath || typeof absPath !== 'string') return '';
+    var i = absPath.lastIndexOf('/artifacts/');
+    if (i < 0) return '';
+    return apiUrl('/artifacts/' + absPath.slice(i + '/artifacts/'.length));
+  }
+
   /** Normalize the /api/library payload into an artifacts array. */
   function normalizeLibrary(payload) {
     if (!payload || !payload.artifacts) return;
     const arts = payload.artifacts;
     state.artifacts = Object.keys(arts).map(function (name) {
       const a = arts[name];
+      var versions = (Array.isArray(a.versions) ? a.versions : []).map(function (v) {
+        var url = v.url || artifactUrl(v.report_path) || artifactUrl(v.path);
+        return Object.assign({}, v, { url: url });
+      });
       return {
         name: name,
         state: a.state || 'unknown',
-        versions: Array.isArray(a.versions) ? a.versions : [],
+        versions: versions,
         raw: a,
       };
     });

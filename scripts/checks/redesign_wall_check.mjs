@@ -103,10 +103,15 @@ const run = async () => {
 
   const json = (obj) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(obj) });
   await page.route('**/api/runs', (r) => r.fulfill(json(mockRuns)));
+  // Real library shape: absolute filesystem path/report_path, NO url field —
+  // the frontend must derive the served /artifacts/<rel> URL itself.
   await page.route('**/api/library', (r) => r.fulfill(json({ artifacts: {
-    'redesign-demo': { state: 'final', versions: [{ url: '/mock-artifact.html' }, { url: '/mock-artifact.html?v=2' }] },
+    'redesign-demo': { state: 'final', versions: [
+      { report_path: '/home/x/.ringer/artifacts/redesign-demo-v1-report.html', path: '/home/x/.ringer/artifacts/versions/redesign-demo/v1.html' },
+      { report_path: '/home/x/.ringer/artifacts/redesign-demo-v2-report.html', path: '/home/x/.ringer/artifacts/versions/redesign-demo/v2.html' },
+    ] },
   } })));
-  await page.route('**/mock-artifact.html*', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<h1>artifact</h1>' }));
+  await page.route('**/artifacts/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<h1>artifact</h1>' }));
   await page.route('**/api/usage', (r) => r.fulfill(json(mockUsage)));
   await page.route('**/api/canon', (r) => r.fulfill(json({ models: [] })));
   await page.route('**/api/models', (r) => r.fulfill(json({ groups: [], rollup: [] })));
@@ -217,6 +222,8 @@ const run = async () => {
   await page.locator('#artifact-picker').selectOption('redesign-demo');
   await page.waitForTimeout(300);
   check('artifact preview iframe renders', await page.locator('#artifact-preview iframe').count() === 1);
+  const iframeSrc = await page.locator('#artifact-preview iframe').getAttribute('src');
+  check('preview src derived from report_path', /\/artifacts\/redesign-demo-v2-report\.html$/.test(iframeSrc || ''), iframeSrc);
   check('version picker has versions', await page.locator('#artifact-version option').count() === 2);
   check('open-in-new-tab link shown', await page.locator('#artifact-open').isVisible());
   await page.locator('#drawer-close').click();
